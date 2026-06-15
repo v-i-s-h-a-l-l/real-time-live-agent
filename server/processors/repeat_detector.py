@@ -14,7 +14,6 @@ import re
 from loguru import logger
 from pipecat.frames.frames import (
     Frame,
-    LLMMessagesAppendFrame,
     TranscriptionFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -61,15 +60,19 @@ def _get_last_assistant_message(context: LLMContext) -> str | None:
 class RepeatDetectorProcessor(FrameProcessor):
     """
     Intercepts TranscriptionFrames with repeat intent.
-    Injects a [USER_WANTS_REPEAT] system hint into the LLMMessagesAppendFrame
-    so the LLM knows exactly what to repeat — no regeneration guesswork.
+
+    When repeat intent is detected, directly injects a [USER_WANTS_REPEAT]
+    system hint into the shared LLM context so the LLM knows exactly what
+    to repeat — no regeneration guesswork.
+
+    NOTE: The hint is appended directly to context.messages because the
+    LLMMessagesAppendFrame is generated DOWNSTREAM by the user_aggregator
+    and never flows back through this processor.
     """
 
     def __init__(self, context: LLMContext, **kwargs):
         super().__init__(**kwargs)
         self._context = context
-        self._repeat_pending = False
-        self._last_assistant_msg: str | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -82,50 +85,26 @@ class RepeatDetectorProcessor(FrameProcessor):
                 last = _get_last_assistant_message(self._context)
 
                 if last:
-                    self._repeat_pending = True
-                    self._last_assistant_msg = last
+                    hint = {
+                        "role": "system",
+                        "content": (
+                            f"[USER_WANTS_REPEAT] The user is asking you to repeat your last response. "
+                            f"Your last response was: \"{last}\" "
+                            f"Repeat it naturally — same meaning, similar wording. "
+                            f"Do NOT add new information. Do NOT say 'as I said' or 'like I mentioned'. "
+                            f"Just say it again as if you're saying it for the first time, naturally."
+                        ),
+                    }
+                    self._context.messages.append(hint)
+
                     logger.info(
-                        "[RepeatDetector] Repeat intent detected | last_msg='{}'",
+                        "[RepeatDetector] Repeat intent detected — hint injected into context | last_msg='{}'",
                         last[:80],
                     )
                 else:
-                    # Nothing to repeat yet — let it through normally
                     logger.info(
                         "[RepeatDetector] Repeat intent but no prior assistant message — passing through"
                     )
-
-            await self.push_frame(frame, direction)
-            return
-
-        # ── LLMMessagesAppendFrame — inject hint if repeat pending ────────
-        if isinstance(frame, LLMMessagesAppendFrame):
-            if self._repeat_pending and self._last_assistant_msg:
-                self._repeat_pending = False  # consume the flag
-
-                hint = {
-                    "role": "system",
-                    "content": (
-                        f"[USER_WANTS_REPEAT] The user is asking you to repeat your last response. "
-                        f"Your last response was: \"{self._last_assistant_msg}\" "
-                        f"Repeat it naturally — same meaning, similar wording. "
-                        f"Do NOT add new information. Do NOT say 'as I said' or 'like I mentioned'. "
-                        f"Just say it again as if you're saying it for the first time, naturally."
-                    ),
-                }
-
-                messages = list(frame.messages)
-                # Insert hint just before the last message (user's utterance)
-                if len(messages) > 0:
-                    messages.insert(-1, hint)
-                else:
-                    messages.append(hint)
-
-                frame = LLMMessagesAppendFrame(messages=messages)
-
-                logger.info(
-                    "[RepeatDetector] Injected repeat hint | msg='{}'",
-                    self._last_assistant_msg[:80],
-                )
 
             await self.push_frame(frame, direction)
             return

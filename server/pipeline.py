@@ -124,7 +124,9 @@ CONTEXT AND MEMORY
 - Never ask for information the user already gave you
 - If something from earlier in the conversation is relevant, use it naturally — don't re-explain or re-ask
 - If the conversation topic changes, follow it smoothly without resetting context
-
+-If the user mentions a new location without specifying a new topic, 
+assume they want the same information as the previous question 
+but for the new location.
 CALL AWAY HANDLING
 - When the user says they're stepping away or taking a call, respond with one short natural acknowledgment:
   Example: "Sure, take your time." or "No problem, I'll be here."
@@ -259,8 +261,8 @@ async def create_pipeline(
         api_key=CEREBRAS_API_KEY,
         settings=CerebrasLLMService.Settings(
             model=LLM_MODEL,
-            temperature=0.5,
-            max_completion_tokens=1500,
+            temperature=0.7,
+            max_completion_tokens=2000,
         ),
     )
     logger.info("LLM service created | session_id={}", sid)
@@ -268,8 +270,8 @@ async def create_pipeline(
     # -- TTS (Cartesia Sonic-3 — ~40ms TTFB)
     tts = CartesiaTTSService(
         api_key=CARTESIA_API_KEY,
-        voice_id="faf0731e-dfb9-4cfc-8119-259a79b27e12",
-        model="sonic-3",
+        voice_id="95d51f79-c397-46f9-b49a-23763d3eaa2d",
+        model="sonic-3.5",
         language="hi" if language == "hi-IN" else "en",
         sample_rate=SAMPLE_RATE,
     )
