@@ -1,8 +1,32 @@
 # Real-Time Live Voice Agent
 
-A production-oriented, **real-time voice AI platform** built for natural spoken conversations — not chatbot-style request/response. The system streams microphone audio over WebSocket, runs a multi-stage Pipecat pipeline (STT → LLM → TTS), and supports **barge-in**, **smart turn detection**, and **pluggable agent personas** on a shared voice core.
+<p align="center">
+  <a href="voice_agent_working.mp4">
+    <img src="https://img.shields.io/badge/▶-Watch_Live_Demo-EA0207?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgZmlsbD0id2hpdGUiIHZpZXdCb3g9IjAgMCAxNiAxNiI+PHBhdGggZD0iTTggMTVBMNyA3IDAgMSAxIDggMWE3IDcgMCAwIDEgMTQgN3ptMC01djRsMy0yTDggNnoiLz48L3N2Zz4=" alt="play"/>
+  </a>
+</p>
 
-**Live demos in this repo:**
+<p align="center">
+  <strong>Real-time voice AI — stream, interrupt, and converse naturally.</strong><br/>
+  Pipecat · Sarvam STT · Cerebras/Groq LLM · Cartesia TTS · Louie + Toyota personas
+</p>
+
+<p align="center">
+  <video src="voice_agent_working.mp4" controls width="720" style="max-width:100%; border-radius:8px; box-shadow:0 4px 24px rgba(0,0,0,0.15);">
+    <a href="voice_agent_working.mp4"><strong>▶ Click to watch the demo video</strong></a>
+  </video>
+</p>
+
+<p align="center">
+  <sub><em><strong>Watch it respond in real time</strong> — speak naturally, barge in mid-sentence, hear voice-first replies</em></sub><br/>
+  <sub>Louie general assistant · Toyota dealership showroom · English &amp; Hindi</sub>
+</p>
+
+---
+
+A production-oriented **real-time voice AI platform** built for natural spoken conversations — not chatbot-style request/response. The system streams microphone audio over WebSocket, runs a multi-stage Pipecat pipeline (STT → LLM → TTS), and supports **barge-in**, **smart turn detection**, and **pluggable agent personas** on a shared voice core.
+
+**Try it locally:**
 
 | Demo | URL | Agent |
 |------|-----|-------|
@@ -192,6 +216,7 @@ ws://localhost:8805/ws?agent=automotive&lang=hi-IN
 
 ```
 real-time-live-agent/
+├── voice_agent_working.mp4     # Demo recording (linked in README)
 ├── client/
 │   ├── index.html              # Louie demo UI
 │   ├── agent.js                # Shared WebSocket + mic + playback + barge-in
