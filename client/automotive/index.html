@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Toyota India — Voice-guided dealership. Explore models, specs, brochures, service, finance, test drives, and more." />
+  <title>Toyota India | Voice Showroom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Sticky utility nav -->
+  <header class="top-bar">
+    <div class="top-bar-inner">
+      <a class="logo" href="/automotive/">
+        <div class="logo-oval">TOYOTA</div>
+        <div class="logo-text">
+          <strong>Toyota India</strong>
+          <span>Authorized Dealer</span>
+        </div>
+      </a>
+      <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Menu">☰</button>
+      <nav class="utility-nav" id="utility-nav" aria-label="Utility">
+        <a class="utility-link" href="#contact">Contact Us</a>
+        <a class="utility-link" href="#voice">Test Drive</a>
+        <a class="utility-link" href="#voice" data-hint="Can you share the price list for Fortuner variants?">Price List</a>
+        <a class="utility-link" href="#voice" data-hint="I'd like the eBrochure for Innova Crysta">eBook</a>
+        <a class="utility-link" href="#voice" data-hint="Tell me about Fortuner from the brochure">Brochure</a>
+        <a class="utility-link" href="#voice" data-hint="I want to exchange my old car">Exchange Car</a>
+        <select id="lang-select" class="lang-select" aria-label="Language">
+          <option value="en-IN">EN</option>
+          <option value="hi-IN">HI</option>
+        </select>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Full-width hero carousel -->
+  <section class="hero-carousel" aria-label="Featured Toyota models">
+    <div class="carousel-track" id="carousel-track">
+      <div class="carousel-slide" style="--slide-img: url('/images/fortuner.avif')">
+        <div class="slide-content">
+          <h2>Fortuner <em>Legender</em></h2>
+          <p>Dominate every road. Ask our voice assistant about specs, variants, and on-road price.</p>
+        </div>
+      </div>
+      <div class="carousel-slide" style="--slide-img: url('/images/innova_srysta.jpg')">
+        <div class="slide-content">
+          <h2>Innova <em>Crysta</em></h2>
+          <p>India's favourite MPV. Compare trims, book a test drive, or check service schedules — by voice.</p>
+        </div>
+      </div>
+      <div class="carousel-slide" style="--slide-img: url('/images/hyryder.jpg')">
+        <div class="slide-content">
+          <h2>Urban Cruiser <em>Hyryder</em></h2>
+          <p>Hybrid efficiency meets SUV style. Talk to your Toyota catalog — no scrolling needed.</p>
+        </div>
+      </div>
+    </div>
+    <button class="carousel-btn prev" id="carousel-prev" type="button" aria-label="Previous slide">‹</button>
+    <button class="carousel-btn next" id="carousel-next" type="button" aria-label="Next slide">›</button>
+    <div class="carousel-dots" id="carousel-dots" role="tablist"></div>
+  </section>
+
+  <!-- Explore Models — horizontal scroll -->
+  <section class="section section-grey" id="models">
+    <div class="container reveal">
+      <div class="section-head">
+        <h2>Explore <span>Models</span></h2>
+        <p>Swipe to browse — tap a model, then ask our voice assistant anything</p>
+      </div>
+      <div class="models-scroll-wrap">
+        <div class="models-scroll" id="models-scroll">
+          <article class="model-card" data-model="Fortuner">
+            <div class="model-img">
+              <img src="/images/fortuner.avif" alt="Toyota Fortuner" loading="lazy" />
+            </div>
+            <div class="model-body">
+              <div class="model-name">Fortuner</div>
+              <div class="model-tag">SUV · 7 Seater · Diesel/Petrol</div>
+              <div class="model-price">From ₹33.43 Lakh*</div>
+              <button type="button" class="model-cta">Explore</button>
+            </div>
+          </article>
+          <article class="model-card" data-model="Innova Crysta">
+            <div class="model-img">
+              <img src="/images/innova_srysta.jpg" alt="Toyota Innova Crysta" loading="lazy" />
+            </div>
+            <div class="model-body">
+              <div class="model-name">Innova Crysta</div>
+              <div class="model-tag">MPV · Premium · 7/8 Seater</div>
+              <div class="model-price">From ₹19.99 Lakh*</div>
+              <button type="button" class="model-cta">Explore</button>
+            </div>
+          </article>
+          <article class="model-card" data-model="Hyryder">
+            <div class="model-img">
+              <img src="/images/hyryder.jpg" alt="Toyota Urban Cruiser Hyryder" loading="lazy" />
+            </div>
+            <div class="model-body">
+              <div class="model-name">Urban Cruiser Hyryder</div>
+              <div class="model-tag">Compact SUV · Strong Hybrid</div>
+              <div class="model-price">From ₹11.34 Lakh*</div>
+              <button type="button" class="model-cta">Explore</button>
+            </div>
+          </article>
+          <article class="model-card" data-model="Camry">
+            <div class="model-img">
+              <img src="/images/camry.jpg" alt="Toyota Camry" loading="lazy" />
+            </div>
+            <div class="model-body">
+              <div class="model-name">Camry</div>
+              <div class="model-tag">Sedan · Hybrid · Flagship</div>
+              <div class="model-price">From ₹48.99 Lakh*</div>
+              <button type="button" class="model-cta">Explore</button>
+            </div>
+          </article>
+          <article class="model-card" data-model="Glanza">
+            <div class="model-img">
+              <img src="/images/glanza.jpg" alt="Toyota Glanza" loading="lazy" />
+            </div>
+            <div class="model-body">
+              <div class="model-name">Glanza</div>
+              <div class="model-tag">Hatchback · City · Efficient</div>
+              <div class="model-price">From ₹6.81 Lakh*</div>
+              <button type="button" class="model-cta">Explore</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Full lineup grid -->
+  <section class="section" id="lineup">
+    <div class="container reveal">
+      <div class="section-head">
+        <h2>Technical Specs &amp; <span>Price</span></h2>
+        <p>Ask about engine, mileage, variants, colours, and ex-showroom pricing for any model</p>
+      </div>
+      <div class="models-grid" id="models-grid">
+        <article class="model-card" data-model="Fortuner">
+          <div class="model-img">
+            <img src="/images/fortuner.avif" alt="Toyota Fortuner" loading="lazy" />
+          </div>
+          <div class="model-body">
+            <div class="model-name">Fortuner</div>
+            <div class="model-tag">2755cc · 4x2 / 4x4 · 6 AT</div>
+            <div class="model-price">₹33.43 – 51.44 Lakh*</div>
+            <button type="button" class="model-cta">View Specs</button>
+          </div>
+        </article>
+        <article class="model-card" data-model="Innova Crysta">
+          <div class="model-img">
+            <img src="/images/innova_srysta.jpg" alt="Toyota Innova Crysta" loading="lazy" />
+          </div>
+          <div class="model-body">
+            <div class="model-name">Innova Crysta</div>
+            <div class="model-tag">2393cc Diesel · 7/8 Seater</div>
+            <div class="model-price">₹19.99 – 27.54 Lakh*</div>
+            <button type="button" class="model-cta">View Specs</button>
+          </div>
+        </article>
+        <article class="model-card" data-model="Hyryder">
+          <div class="model-img">
+            <img src="/images/hyryder.jpg" alt="Toyota Urban Cruiser Hyryder" loading="lazy" />
+          </div>
+          <div class="model-body">
+            <div class="model-name">Hyryder</div>
+            <div class="model-tag">Hybrid · 27 km/l claim</div>
+            <div class="model-price">₹11.34 – 20.19 Lakh*</div>
+            <button type="button" class="model-cta">View Specs</button>
+          </div>
+        </article>
+        <article class="model-card" data-model="Camry">
+          <div class="model-img">
+            <img src="/images/camry.jpg" alt="Toyota Camry" loading="lazy" />
+          </div>
+          <div class="model-body">
+            <div class="model-name">Camry</div>
+            <div class="model-tag">2.5L Hybrid · Premium Sedan</div>
+            <div class="model-price">₹48.99 Lakh*</div>
+            <button type="button" class="model-cta">View Specs</button>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Voice assistant -->
+  <section class="section voice-section" id="voice">
+    <div class="container reveal">
+      <div class="voice-grid">
+        <div class="voice-main">
+          <h2>Talk to <span>Toyota</span></h2>
+          <p>
+            Brochure Q&amp;A, service booking, finance &amp; EMI, test drives, parts, warranty,
+            nearest dealer, and service checklists — all by voice. English or Hindi.
+          </p>
+
+          <div class="voice-panel">
+            <div id="status-pill" class="voice-status-pill">
+              <span class="dot"></span>
+              <span class="status-label">Offline</span>
+            </div>
+            <div id="voice-orb" class="voice-orb" aria-hidden="true"></div>
+            <p id="voice-hint" class="voice-hint">Tap Start Voice Session to speak with our Toyota assistant.</p>
+            <div class="voice-actions">
+              <button id="connect-btn" class="btn btn-red" type="button">Start Voice Session</button>
+              <button id="disconnect-btn" class="btn btn-outline" type="button" disabled>End Session</button>
+            </div>
+            <div id="chips-grid" class="chips-grid"></div>
+          </div>
+        </div>
+
+        <aside class="transcript-panel" aria-label="Live conversation">
+          <div class="transcript-header">
+            <h3>Live Conversation</h3>
+          </div>
+          <div id="context-strip" class="context-strip">
+            <strong>Offline</strong> · Model: <strong>Fortuner</strong>
+          </div>
+          <div id="transcript-body" class="transcript-body">
+            <div class="transcript-empty">Start a voice session to see your conversation here.</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- Services -->
+  <section class="section section-grey" id="service">
+    <div class="container reveal">
+      <div class="section-head">
+        <h2>Ownership <span>Services</span></h2>
+        <p>Everything from booking to warranty — ask the voice assistant</p>
+      </div>
+      <div class="services-grid">
+        <div class="service-card" id="brochure">
+          <div class="service-icon">📋</div>
+          <h4>Brochure &amp; Q&amp;A</h4>
+          <p>Specs, features, comparisons from official brochures</p>
+        </div>
+        <div class="service-card">
+          <div class="service-icon">🔧</div>
+          <h4>Service Booking</h4>
+          <p>Schedule, reschedule, and service checklist reports</p>
+        </div>
+        <div class="service-card" id="finance">
+          <div class="service-icon">💳</div>
+          <h4>Finance &amp; EMI</h4>
+          <p>Loan schemes, down payment, monthly EMI estimates</p>
+        </div>
+        <div class="service-card">
+          <div class="service-icon">🛣️</div>
+          <h4>Test Drive</h4>
+          <p>Book at your nearest Toyota showroom</p>
+        </div>
+        <div class="service-card">
+          <div class="service-icon">🔩</div>
+          <h4>Parts &amp; Accessories</h4>
+          <p>Compatible parts, prices, and availability</p>
+        </div>
+        <div class="service-card" id="support">
+          <div class="service-icon">🛡️</div>
+          <h4>Warranty &amp; Support</h4>
+          <p>Warranty coverage, roadside help, nearest location</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="site-footer" id="contact">
+    <strong>Toyota India</strong> · Authorized Dealer · Gurugram<br />
+    Sales: 1800-209-0000 · Service: 1800-102-0000 · Roadside: 1800-270-0000<br />
+    *Ex-showroom price. Voice assistant powered by Ministros AI.
+  </footer>
+
+  <!-- Sticky FAB -->
+  <div class="fab-bar" role="toolbar" aria-label="Quick actions">
+    <div class="fab-inner">
+      <button type="button" class="fab-btn" id="fab-test-drive" data-hint="I want to book a test drive for Fortuner this weekend">
+        <span class="fab-icon">🛣️</span> Book Test Drive
+      </button>
+      <button type="button" class="fab-btn" id="fab-brochure" data-hint="Can I get the brochure for Innova Crysta top variant?">
+        <span class="fab-icon">📋</span> Get Brochure
+      </button>
+      <button type="button" class="fab-btn" id="fab-price" data-hint="What is the on-road price of Hyryder hybrid top model?">
+        <span class="fab-icon">💰</span> Price List
+      </button>
+    </div>
+  </div>
+
+  <script src="/agent.js"></script>
+  <script src="automotive.js"></script>
+</body>
+</html>

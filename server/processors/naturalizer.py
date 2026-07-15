@@ -129,20 +129,26 @@ _BACKGROUND_SENTINEL = "[BACKGROUND]"
 
 # Minimum buffered characters before we attempt starter injection.
 # Prevents picking a category from a single token like "Int" or "The".
-_DEFAULT_MIN_CHUNK = 18
+# Kept low so the first audio chunk reaches TTS quickly (lower latency).
+_DEFAULT_MIN_CHUNK = 10
 
 # How many words trigger "explanatory" vs "casual" on a neutral response.
 _EXPLANATORY_WORD_THRESHOLD = 12
 
 
+# Words whose capitalization must never be changed when they start a response.
+# Lowercasing "I" -> "i" reads as illiterate and TTS mangles the prosody.
+_KEEP_CAPS_FIRST = re.compile(r"^(I|I'm|I'll|I've|I'd)\b")
+
+
 def _safe_lower_first(text: str) -> str:
     """
     Lowercase the first character of *text* safely for any Unicode script.
-    Returns the original string unchanged if it is empty or starts with a
-    non-letter (e.g., a digit or punctuation) — avoids crashing on
-    Devanagari or other non-Latin scripts where case doesn't apply.
+    Returns the original string unchanged if it is empty, starts with a
+    non-letter (e.g., a digit or punctuation), or begins with a word that
+    must stay capitalized (the pronoun "I" and its contractions).
     """
-    if not text:
+    if not text or _KEEP_CAPS_FIRST.match(text):
         return text
     first = text[0]
     cat = unicodedata.category(first)
@@ -172,7 +178,7 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         add_starters: bool = True,
         min_chunk_length: int = _DEFAULT_MIN_CHUNK,
         starter_cooldown: int = 5,
-        empty_starter_probability: float = 0.40,
+        empty_starter_probability: float = 0.65,
         **kwargs,
     ):
         """
@@ -222,8 +228,11 @@ class ResponseNaturalizerProcessor(FrameProcessor):
 
         category = self._category_for(text)
 
-        # On neutral/casual categories, respect empty_starter_probability
-        if category in ("neutral", "casual") and random.random() < self._empty_p:
+        # Only affirmations/acknowledgements ("Yeah,", "Got it —") reliably sound
+        # natural as spoken openers. For everything else, usually start with no
+        # filler at all so the agent doesn't develop a robotic "Well, So, Basically"
+        # tic across a conversation.
+        if category != "affirmative" and random.random() < self._empty_p:
             return ""
 
         pool = self._starters.get(category, self._starters["neutral"])
@@ -290,6 +299,39 @@ class ResponseNaturalizerProcessor(FrameProcessor):
 
         return text
 
+    def _clean_chunk(self, raw: str) -> str:
+        """
+        Clean a single streaming token chunk while PRESERVING the exact
+        leading/trailing whitespace the model produced.
+
+        The LLM streams tokens like " can", " help", "ie". Stripping every
+        chunk jams words together ("canhelp"); inserting a space between every
+        chunk splits words apart ("Lou ie"). Both make TTS sound garbled and
+        robotic. Here we keep precisely the whitespace the model sent and only
+        remove robotic preambles and TTS-hostile symbols from the core text.
+        """
+        if not raw:
+            return ""
+        # Let the [BACKGROUND] sentinel flow through untouched so the
+        # downstream empty-guard can detect and suppress it.
+        if raw.strip() == _BACKGROUND_SENTINEL:
+            return raw
+
+        lead = " " if raw[:1].isspace() else ""
+        trail = " " if raw[-1:].isspace() else ""
+
+        core = self._strip_preamble(raw.strip())
+        core = self._apply_subs(core)
+        core = self._apply_symbols(core)
+        core = re.sub(r" {2,}", " ", core).strip()
+
+        if not core:
+            # Symbols/whitespace only — collapse to a single separating space if
+            # the original had any, so surrounding words don't weld together.
+            return " " if (lead or trail) else ""
+
+        return lead + core + trail
+
     # ── Turn state ───────────────────────────────────────────────────────────
 
     def _reset(self) -> None:
@@ -327,6 +369,21 @@ class ResponseNaturalizerProcessor(FrameProcessor):
 
         # ── TextFrame: main path ─────────────────────────────────────────────
         if isinstance(frame, TextFrame):
+            # Background sentinel: pass through untouched so the empty-guard
+            # downstream can detect it. Never clean or split it.
+            if frame.text.strip() == _BACKGROUND_SENTINEL:
+                await self.push_frame(frame, direction)
+                return
+
+            # Simple path (programmatic starters disabled): clean each chunk
+            # while preserving the model's own whitespace, then stream it.
+            if not self._add_starters:
+                cleaned = self._clean_chunk(frame.text)
+                if cleaned:
+                    await self.push_frame(TextFrame(text=cleaned), direction)
+                return
+
+            # Starter path (buffered): accumulate enough text to pick a starter.
             text = self._clean(frame.text)
 
             if not text:
@@ -347,8 +404,10 @@ class ResponseNaturalizerProcessor(FrameProcessor):
                 # else: still buffering — hold, don't push yet
 
             else:
-                # Starter already injected — stream chunks straight through
-                await self.push_frame(TextFrame(text=text), direction)
+                # Starter already injected — stream chunks through, preserving
+                # the model's leading whitespace so words don't jam together.
+                leading_space = " " if frame.text[:1].isspace() else ""
+                await self.push_frame(TextFrame(text=leading_space + text), direction)
 
         # ── End of LLM response ──────────────────────────────────────────────
         elif isinstance(frame, LLMFullResponseEndFrame):

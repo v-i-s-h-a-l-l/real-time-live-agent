@@ -40,19 +40,26 @@ TIMEOUT_FALLBACKS = [
     "just a sec",
 ]
 
-# Empty fallbacks — LLM returned empty, likely unclear input
+# Empty fallbacks — LLM returned empty. Keep these light and natural, and don't
+# lean on "sorry" every time (over-apologizing sounds robotic).
 EMPTY_FALLBACKS = [
-    "sorry what were you asking?",
-    "can you come again?",
-    "hm come again?",
-    "what was that?",
-    "didn't catch that",
-    "say that again?",
-    "sorry, what?",
-    "one more time?",
-    "missed that — go on",
+    "sorry, could you say that again?",
+    "hmm, one more time?",
+    "I didn't quite catch that — go on",
+    "wait, say that again?",
     "you were saying?",
+    "mind repeating that?",
+    "gotcha — what was that again?",
 ]
+
+# Escalation line — used after several empty responses in a row so the user
+# never gets stuck hearing "say that again?" on a loop.
+ESCALATION_FALLBACK = (
+    "I'm having a bit of trouble on my end. Can you tell me in a few words what you need?"
+)
+
+# After this many consecutive empty responses, switch to the escalation line.
+_ESCALATION_AFTER = 3
 
 # Sentinel emitted by the LLM for background conversations.
 # When the naturalizer swallows this, the response appears empty —
@@ -168,8 +175,8 @@ class LLMEmptyGuardProcessor(FrameProcessor):
                 self._is_background = True
                 self._cancel_timeout()
                 logger.debug("[LLMEmptyGuard] [BACKGROUND] detected — suppressing fallback")
-                # Don't push the sentinel frame — naturalizer will also swallow it
-                await self.push_frame(frame, direction)
+                # Drop the sentinel entirely — it must NEVER reach TTS, or the
+                # bot would literally say "background".
                 return
 
             self._has_text = True
@@ -191,9 +198,15 @@ class LLMEmptyGuardProcessor(FrameProcessor):
                 else:
                     # Genuinely empty — inject fallback
                     self._consecutive_empties += 1
-                    fallback = self._pick_fallback(
-                        self._empty_fallbacks, "_last_empty_index"
-                    )
+                    if self._consecutive_empties >= _ESCALATION_AFTER:
+                        # Too many empties in a row — stop asking them to repeat
+                        # and take ownership of the problem instead.
+                        fallback = ESCALATION_FALLBACK
+                        self._consecutive_empties = 0
+                    else:
+                        fallback = self._pick_fallback(
+                            self._empty_fallbacks, "_last_empty_index"
+                        )
                     logger.warning(
                         "[LLMEmptyGuard] LLM returned empty response (streak={}) — injecting: '{}'",
                         self._consecutive_empties,

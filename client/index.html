@@ -141,7 +141,7 @@
       }
     }
 
-    window.agent = new UIVoiceAgent('wss://niece-challenge-underuse.ngrok-free.dev/ws');
+    window.agent = new UIVoiceAgent('ws://localhost:8805/ws');
 
     connectBtn.onclick = () => agent.connect(langSelect.value);
     disconnectBtn.onclick = () => agent.disconnect();

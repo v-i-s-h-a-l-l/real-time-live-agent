@@ -52,8 +52,8 @@ class VoiceAgent {
     /* Public API                                                           */
     /* ------------------------------------------------------------------ */
 
-    async connect(lang = 'en-IN') {
-        console.log('[VoiceAgent] connect() called, lang:', lang);
+    async connect(lang = 'en-IN', extraParams = {}) {
+        console.log('[VoiceAgent] connect() called, lang:', lang, extraParams);
         try {
             this.mediaStream = await navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -66,7 +66,9 @@ class VoiceAgent {
             });
             console.log('[VoiceAgent] mic access granted');
 
-            const url = `${this.wsBaseUrl}?lang=${lang}`;
+            const base = this.wsBaseUrl.split('?')[0];
+            const params = new URLSearchParams({ lang, ...extraParams });
+            const url = `${base}?${params}`;
             console.log('[VoiceAgent] connecting to WebSocket:', url);
             this.ws = new WebSocket(url);
             this.ws.binaryType = 'arraybuffer';
@@ -117,7 +119,7 @@ class VoiceAgent {
             await this.audioContext.resume();
         }
 
-        await this.audioContext.audioWorklet.addModule('audio-processor.js');
+        await this.audioContext.audioWorklet.addModule('/audio-processor.js');
         console.log('[VoiceAgent] AudioWorklet loaded');
 
         const source = this.audioContext.createMediaStreamSource(this.mediaStream);

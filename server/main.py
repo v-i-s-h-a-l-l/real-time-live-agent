@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi.responses import JSONResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.frames.frames import LLMContextFrame
-from config import GROQ_API_KEY, SARVAM_API_KEY
+from config import CEREBRAS_API_KEY, SARVAM_API_KEY
 from pipeline import create_pipeline
 
 
@@ -61,22 +62,31 @@ async def websocket_endpoint(websocket: WebSocket):
         websocket.client,
     )
 
-    # Accept ?lang=en-IN (default)
+    # Accept ?lang=en-IN (default), ?agent=louie|automotive (default louie)
     language = websocket.query_params.get("lang", "en-IN")
+    agent = websocket.query_params.get("agent", "louie")
 
     try:
-        transport, task, context = await create_pipeline(websocket, language=language)
+        transport, task, context = await create_pipeline(
+            websocket, language=language, agent=agent
+        )
 
         @transport.event_handler("on_client_connected")
         async def on_connected(t, ws):
-            logger.info("Pipeline running | session_id={}", session_id)
-            # Append greeting instruction and trigger LLM generation
-            context.messages.append(
-                {
-                    "role": "system",
-                    "content": "The user just connected. Greet them warmly — introduce yourself as Louie in one short sentence and ask how you can help. Keep it natural and brief.",
-                }
+            logger.info(
+                "Pipeline running | session_id={} agent={}", session_id, agent
             )
+            if agent == "automotive":
+                from agents.automotive.prompts import get_toyota_connect_greeting
+
+                greeting = get_toyota_connect_greeting()
+            else:
+                greeting = (
+                    "The user just connected. Greet them warmly — introduce yourself as "
+                    "Louie in one short sentence and ask how you can help. "
+                    "Keep it natural and brief."
+                )
+            context.messages.append({"role": "system", "content": greeting})
             await task.queue_frames([LLMContextFrame(context=context)])
 
         @transport.event_handler("on_client_disconnected")
@@ -117,7 +127,13 @@ if __name__ == "__main__":
     )
 
 
+# Serve car images — before catch-all client mount
+_images_dir = Path(__file__).resolve().parent.parent / "images"
+if _images_dir.is_dir():
+    app.mount("/images", StaticFiles(directory=str(_images_dir)), name="images")
+
 # Serve frontend — must be LAST (catches all remaining routes)
+_client_dir = Path(__file__).resolve().parent.parent / "client"
 app.mount(
-    "/", StaticFiles(directory=r"c:\liveinterruption\client", html=True), name="static"
+    "/", StaticFiles(directory=str(_client_dir), html=True), name="static"
 )
