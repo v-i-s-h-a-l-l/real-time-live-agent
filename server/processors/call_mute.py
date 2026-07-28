@@ -43,7 +43,7 @@ UNMUTE_PATTERNS = [
     r"\b(hey|hi|hello|okay|ok)\s*(i'?m?\s*)?(back|here|there|done|free)\b",
     r"\bi'?m?\s*back\b",
     r"\bare\s+you\s+(there|here|still there|still here|listening)\b",
-    r"\b(louie|lowie|louey)\s*(are\s+you)?\s*(there|here|back)?\b",  # bot name variants
+    r"\b(ministros|ministro)\s*(are\s+you)?\s*(there|here|back)?\b",  # bot name variants
     r"\bsorry\s+(about\s+that|for\s+that|to\s+keep\s+you)\b",
     r"\bback\s+at\s+it\b",
     r"\bwhere\s+were\s+we\b",

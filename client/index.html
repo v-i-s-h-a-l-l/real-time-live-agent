@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Live Voice Agent</title>
+  <title>Ministros Voice Agent</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -85,7 +85,7 @@
 </head>
 <body>
 
-  <h1>🎙️ Live Voice Agent</h1>
+  <h1>🎙️ Ministros</h1>
   <p class="sub">Speak naturally — no button to hold. Just talk.</p>
 
   <div class="orb" id="orb"></div>
@@ -100,6 +100,8 @@
     <button id="disconnect-btn" disabled>Disconnect</button>
   </div>
 
+  <script src="config.generated.js"></script>
+  <script src="config.js"></script>
   <script src="agent.js"></script>
   <script>
     const orb           = document.getElementById('orb');
@@ -141,7 +143,8 @@
       }
     }
 
-    window.agent = new UIVoiceAgent('ws://localhost:8805/ws');
+    // Local: same-origin /ws via FastAPI. Vercel: set MINISTROS_WS_URL → wss://…onrender.com/ws
+    window.agent = new UIVoiceAgent(window.MINISTROS_WS_URL);
 
     connectBtn.onclick = () => agent.connect(langSelect.value);
     disconnectBtn.onclick = () => agent.disconnect();

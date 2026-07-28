@@ -1,0 +1,7 @@
+{
+  "name": "ministros-voice-frontend",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/write-config.js"
+  }
+}

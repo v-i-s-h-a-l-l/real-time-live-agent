@@ -2,10 +2,7 @@ from loguru import logger
 
 # -- Smart Turn
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
-from pipecat.turns.user_stop import (
-    TurnAnalyzerUserTurnStopStrategy,
-    SpeechTimeoutUserTurnStopStrategy,
-)
+from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_start import (
     VADUserTurnStartStrategy,
 )
@@ -69,12 +66,14 @@ from processors.turn_reset import TurnResetProcessor
 from processors.turn_logger import TurnLifecycleProcessor
 from processors.silence_detector import SilenceDetectorProcessor
 from processors.denoiser import RNNoiseDenoiserProcessor
+from processors.transcription_dedup import TranscriptionDedupProcessor
+from processors.llm_inference_dedup import LLMInferenceDedupProcessor
 
 
 def get_system_prompt(language: str) -> str:
     lang_name = "Hindi" if language == "hi-IN" else "English"
 
-    return f"""You are Louie, a warm, natural-sounding real-time voice assistant. You speak {lang_name}.
+    return f"""You are Ministros, a warm, natural-sounding real-time voice assistant. You speak {lang_name}.
 
 You are NOT a chatbot. You are a voice agent. Everything you say is spoken aloud and
 played to the user in real time, so talk like a real person on a phone call — not like
@@ -114,7 +113,7 @@ keep the same intent from before.
   clarifying question instead of guessing.
 
 NAME-ONLY OR GREETING-ONLY INPUTS
-If the user says only your name or a bare greeting ("Louie?", "hey Louie", "hello?", "hi?"):
+If the user says only your name or a bare greeting ("Ministros?", "hey Ministros", "hello?", "hi?"):
 - Reply with one short, natural "I'm here" — like "Yeah, I'm here.", "Hey, what's up?", "Go ahead."
 - Don't ask "how can I help you?" and don't re-introduce yourself.
 - If you've already been talking, just pick up the earlier tone.
@@ -180,10 +179,9 @@ async def create_pipeline(
     websocket,
     language: str = "en-IN",
     session_id: str | None = None,
-    agent: str = "louie",
 ):
     sid = session_id or "-"
-    logger.info("Creating pipeline | session_id={} language={} agent={}", sid, language, agent)
+    logger.info("Creating pipeline | session_id={} language={}", sid, language)
 
     # -- Transport
     transport = FastAPIWebsocketTransport(
@@ -205,7 +203,6 @@ async def create_pipeline(
     smart_turn_stop = TurnAnalyzerUserTurnStopStrategy(
         turn_analyzer=LocalSmartTurnAnalyzerV3(),
     )
-    speech_timeout_stop = SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=2.0)
     vad_turn_start = VADUserTurnStartStrategy()
     logger.info("Turn strategies created | session_id={}", sid)
 
@@ -232,6 +229,8 @@ async def create_pipeline(
         keepalive_interval=5.0,
         settings=SarvamSTTService.Settings(
             language="unknown",
+            # Pipecat Silero VAD owns turn boundaries; Sarvam only transcribes + flush.
+            vad_signals=False,
         ),
     )
     logger.info("STT service created | session_id={}", sid)
@@ -304,6 +303,8 @@ async def create_pipeline(
     )
 
     call_mute = CallMuteProcessor()
+    transcription_dedup = TranscriptionDedupProcessor()
+    llm_inference_dedup = LLMInferenceDedupProcessor()
 
     logger.info("Custom processors created | session_id={}", sid)
 
@@ -311,14 +312,8 @@ async def create_pipeline(
     rtvi = RTVIProcessor()
     logger.info("RTVI processor created | session_id={}", sid)
 
-    # -- LLM context (Louie by default; Toyota advisor for agent=automotive)
-    if agent == "automotive":
-        from agents.automotive.prompts import get_toyota_system_prompt
-
-        system_prompt = get_toyota_system_prompt(language)
-    else:
-        system_prompt = get_system_prompt(language)
-
+    # -- LLM context (Ministros)
+    system_prompt = get_system_prompt(language)
     context = LLMContext(
         messages=[{"role": "system", "content": system_prompt}]
     )
@@ -327,10 +322,12 @@ async def create_pipeline(
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
+            user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
                 start=[vad_turn_start],
-                stop=[smart_turn_stop, speech_timeout_stop],
+                # Only Smart Turn stops the user turn — SpeechTimeout as a second
+                # stop strategy raced TurnAnalyzer and triggered duplicate LLM runs.
+                stop=[smart_turn_stop],
             ),
             user_turn_stop_timeout=3.0,
         ),
@@ -353,11 +350,13 @@ async def create_pipeline(
             turn_reset,  # drop truncated assistant from context on interrupt
             silence_detector,  # detect returning user after silence gap
             stt,  # audio -> TranscriptionFrame
+            transcription_dedup,  # drop duplicate STT text before LLM trigger
             call_mute,  # drop frames while user is on a call
             repeat_detector,  # detect repeat intent, inject hint
             user_aggregator,  # turn detection + LLM context
             turn_logger,  # [Turn] lifecycle logs
             context_sanitizer,  # sanitize + trim before LLM
+            llm_inference_dedup,  # drop duplicate LLM triggers for same utterance
             pivot_detector,  # topic-change detection
             llm,  # text -> streaming response
             naturalizer,  # clean robotic phrases

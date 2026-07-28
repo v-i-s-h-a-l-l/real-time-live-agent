@@ -3,7 +3,7 @@ IntentClassifierProcessor
 ─────────────────────────
 Classifies transcribed text into one of three categories:
 
-    DIRECTED_TO_ASSISTANT  — User is talking to Louie
+    DIRECTED_TO_ASSISTANT  — User is talking to Ministros
     BACKGROUND_CONVERSATION — User is talking to someone else
     UNCERTAIN              — Ambiguous; defaults to silence
 
@@ -39,10 +39,10 @@ class Intent(enum.Enum):
 
 # ── Wake words ───────────────────────────────────────────────────────────────
 WAKE_PATTERNS = [
-    r"\b(?:hey\s+)?louie\b",
-    r"\b(?:hi\s+)?louie\b",
-    r"\b(?:ok(?:ay)?\s+)?louie\b",
-    r"\blouie[\s,!.?]",
+    r"\b(?:hey\s+)?ministros\b",
+    r"\b(?:hi\s+)?ministros\b",
+    r"\b(?:ok(?:ay)?\s+)?ministros\b",
+    r"\bministros[\s,!.?]",
 ]
 _WAKE_RE = re.compile("|".join(WAKE_PATTERNS), re.IGNORECASE)
 
@@ -97,7 +97,7 @@ _BACKGROUND_RE = re.compile("|".join(BACKGROUND_PATTERNS), re.IGNORECASE)
 # ── LLM classification prompt ────────────────────────────────────────────────
 _CLASSIFY_PROMPT = """You are a classifier. Classify the following utterance as exactly one of: ASSISTANT, BACKGROUND.
 
-Context: The user is near a voice assistant called Louie. Determine if the utterance is directed at the voice assistant (a command, question, or request) or is part of a background conversation with another person.
+Context: The user is near a voice assistant called Ministros. Determine if the utterance is directed at the voice assistant (a command, question, or request) or is part of a background conversation with another person.
 
 Rules:
 - If it sounds like a command, question, or request for information → ASSISTANT
@@ -111,7 +111,7 @@ Classification (respond with exactly one word — ASSISTANT or BACKGROUND):"""
 
 class IntentClassifierProcessor(FrameProcessor):
     """
-    Classify transcriptions to determine if the user is talking to Louie.
+    Classify transcriptions to determine if the user is talking to Ministros.
 
     Args:
         llm_service:       The LLM service instance (e.g., CerebrasLLMService)

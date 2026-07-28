@@ -46,6 +46,14 @@ class VoiceAgent {
         this._serverHandledBargeIn = false;
         /** @type {ReturnType<typeof setTimeout> | null} */
         this._serverBargeInResetTimer = null;
+
+        this._connecting = false;
+        this._lastTranscript = '';
+        this._lastTranscriptAt = 0;
+        /** @type {MediaStreamAudioSourceNode | null} */
+        this._micSource = null;
+        /** @type {GainNode | null} */
+        this._silentGain = null;
     }
 
     /* ------------------------------------------------------------------ */
@@ -53,17 +61,58 @@ class VoiceAgent {
     /* ------------------------------------------------------------------ */
 
     async connect(lang = 'en-IN', extraParams = {}) {
+        if (this.isConnected) {
+            console.warn('[VoiceAgent] connect() ignored — session already active');
+            return;
+        }
+        if (this._connecting) {
+            console.warn('[VoiceAgent] connect() ignored — connection already in progress');
+            return;
+        }
+        // Cross-instance guard: home + showroom scripts once both bound the same button.
+        if (window.__drivecareActiveAgent && window.__drivecareActiveAgent !== this) {
+            const other = window.__drivecareActiveAgent;
+            if (other.isConnected || other._connecting) {
+                console.warn('[VoiceAgent] connect() ignored — another agent already owns the session');
+                return;
+            }
+        }
+        this._connecting = true;
+        window.__drivecareActiveAgent = this;
+
+        // Drop any half-open mic / worklet / socket from a prior failed attempt.
+        this._stopAudioGraph();
+        if (this.ws) {
+            try {
+                this.ws.onopen = null;
+                this.ws.onmessage = null;
+                this.ws.onclose = null;
+                this.ws.onerror = null;
+                if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+                    this.ws.close();
+                }
+            } catch (_e) { /* ignore */ }
+            this.ws = null;
+        }
+
         console.log('[VoiceAgent] connect() called, lang:', lang, extraParams);
         try {
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                },
-            });
+            // Prefer soft constraints — a hard sampleRate/deviceId often surfaces as
+            // "Requested device not found" on Windows when no matching device exists.
+            // AudioContext still resamples to 16 kHz for the pipeline.
+            try {
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                    },
+                });
+            } catch (firstErr) {
+                console.warn('[VoiceAgent] constrained mic failed, retrying with audio:true', firstErr);
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
             console.log('[VoiceAgent] mic access granted');
 
             const base = this.wsBaseUrl.split('?')[0];
@@ -75,6 +124,7 @@ class VoiceAgent {
 
             this.ws.onopen = async () => {
                 console.log('[VoiceAgent] WebSocket connected');
+                this._connecting = false;
                 this.isConnected = true;
                 await this._startAudioCapture();
                 this._onConnected();
@@ -85,25 +135,86 @@ class VoiceAgent {
 
             this.ws.onclose = (event) => {
                 console.log('[VoiceAgent] WebSocket closed, code:', event.code, 'reason:', event.reason);
-                this._cleanup();
+                this._connecting = false;
+                this._cleanup(false);
                 this._onDisconnected();
             };
 
             this.ws.onerror = (err) => {
                 console.error('[VoiceAgent] WS error', err);
+                this._connecting = false;
                 this._onError({ message: 'WebSocket error' });
             };
         } catch (err) {
+            this._connecting = false;
             console.error('[VoiceAgent] connect failed', err);
-            this._onError({ message: err.message });
+            const name = err?.name || '';
+            let message = err?.message || 'Could not access microphone';
+            if (name === 'NotFoundError' || /Requested device not found/i.test(message)) {
+                message =
+                    'No microphone found. Plug in a mic, enable it in Windows Sound settings, ' +
+                    'allow mic access for this browser, then refresh and try again.';
+            } else if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                message =
+                    'Microphone permission denied. Click the lock/info icon in the address bar, ' +
+                    'allow Microphone, then refresh.';
+            } else if (name === 'NotReadableError' || name === 'AbortError') {
+                message =
+                    'Microphone is busy (another app may be using it). Close Zoom/Teams/etc. and try again.';
+            }
+            this._onError({ message });
         }
     }
 
     disconnect() {
         console.log('[VoiceAgent] disconnect() called');
-        if (this.ws) this.ws.close();
-        this._cleanup();
+        this._connecting = false;
+        if (window.__drivecareActiveAgent === this) {
+            window.__drivecareActiveAgent = null;
+        }
+        if (this.ws) {
+            try {
+                this.ws.onopen = null;
+                this.ws.onmessage = null;
+                this.ws.onclose = null;
+                this.ws.onerror = null;
+                if (this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.close();
+                }
+            } catch (_e) { /* ignore */ }
+            this.ws = null;
+        }
+        this._cleanup(false);
         this._onDisconnected();
+    }
+
+    /** Tear down mic capture without resetting connection flags (used before reconnect). */
+    _stopAudioGraph() {
+        if (this._micHealthTimer) {
+            clearTimeout(this._micHealthTimer);
+            this._micHealthTimer = null;
+        }
+        if (this.workletNode) {
+            this.workletNode.port.onmessage = null;
+            try { this.workletNode.disconnect(); } catch (_e) { /* ignore */ }
+            this.workletNode = null;
+        }
+        if (this._micSource) {
+            try { this._micSource.disconnect(); } catch (_e) { /* ignore */ }
+            this._micSource = null;
+        }
+        if (this._silentGain) {
+            try { this._silentGain.disconnect(); } catch (_e) { /* ignore */ }
+            this._silentGain = null;
+        }
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => { });
+            this.audioContext = null;
+        }
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach((t) => t.stop());
+            this.mediaStream = null;
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -123,7 +234,13 @@ class VoiceAgent {
         console.log('[VoiceAgent] AudioWorklet loaded');
 
         const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+        this._micSource = source;
         this.workletNode = new AudioWorkletNode(this.audioContext, 'audio-capture');
+
+        // Keep the worklet in the render graph (required for process() to run)
+        // without audible mic loopback.
+        this._silentGain = this.audioContext.createGain();
+        this._silentGain.gain.value = 0;
 
         this.workletNode.port.onmessage = (event) => {
             if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
@@ -152,6 +269,8 @@ class VoiceAgent {
         };
 
         source.connect(this.workletNode);
+        this.workletNode.connect(this._silentGain);
+        this._silentGain.connect(this.audioContext.destination);
         console.log('[VoiceAgent] audio capture pipeline connected');
     }
 
@@ -203,11 +322,27 @@ class VoiceAgent {
                     break;
 
                 case 'user-transcription': {
-                    const text = data.text || msg.text || '';
+                    const text = (data.text || msg.text || '').trim();
                     console.log('[VoiceAgent] transcription:', text);
-                    if (text) this._onTranscription(text);
+                    if (!text) break;
+                    const normalized = text.replace(/\s+/g, ' ').toLowerCase();
+                    const now = Date.now();
+                    if (
+                        normalized === this._lastTranscript &&
+                        now - this._lastTranscriptAt < 3000
+                    ) {
+                        console.log('[VoiceAgent] duplicate transcription suppressed');
+                        break;
+                    }
+                    this._lastTranscript = normalized;
+                    this._lastTranscriptAt = now;
+                    this._onTranscription(text);
                     break;
                 }
+
+                case 'user-llm-text':
+                    // Context push echo — transcript UI uses user-transcription only.
+                    break;
 
                 case 'bot-llm-started':
                     this._onThinking();
@@ -393,10 +528,16 @@ class VoiceAgent {
         return buffer;
     }
 
-    _cleanup() {
+    _cleanup(resetWs = true) {
         this.isConnected = false;
+        this._connecting = false;
+        if (window.__drivecareActiveAgent === this) {
+            window.__drivecareActiveAgent = null;
+        }
         this._botIsSpeaking = false;
         this._acceptBotAudio = false;
+        this._lastTranscript = '';
+        this._lastTranscriptAt = 0;
         this._clearInterruptDebounce();
         this._clearServerBargeInReset();
         this._serverHandledBargeIn = false;
@@ -406,10 +547,19 @@ class VoiceAgent {
         this._isPlaying = false;
         this._audioFramesSent = 0;
         this._botStartedSpeakingAt = 0;
-        if (this._micHealthTimer) { clearTimeout(this._micHealthTimer); this._micHealthTimer = null; }
-        if (this.workletNode) { this.workletNode.disconnect(); this.workletNode = null; }
-        if (this.audioContext) { this.audioContext.close().catch(() => { }); this.audioContext = null; }
-        if (this.mediaStream) { this.mediaStream.getTracks().forEach(t => t.stop()); this.mediaStream = null; }
+        this._stopAudioGraph();
+        if (resetWs && this.ws) {
+            try {
+                this.ws.onopen = null;
+                this.ws.onmessage = null;
+                this.ws.onclose = null;
+                this.ws.onerror = null;
+                if (this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.close();
+                }
+            } catch (_e) { /* ignore */ }
+            this.ws = null;
+        }
         console.log('[VoiceAgent] cleanup complete');
     }
 

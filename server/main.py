@@ -1,15 +1,16 @@
-import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi.responses import JSONResponse
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pipecat.pipeline.runner import PipelineRunner
 from pipecat.frames.frames import LLMContextFrame
-from config import CEREBRAS_API_KEY, SARVAM_API_KEY
+from pipecat.pipeline.runner import PipelineRunner
+
+from config import CEREBRAS_API_KEY, SARVAM_API_KEY, FRONTEND_ORIGINS
 from pipeline import create_pipeline
 
 
@@ -20,12 +21,13 @@ async def lifespan(app: FastAPI):
     logger.info("Voice Agent server shutting down.")
 
 
-app = FastAPI(title="Live Voice Agent", lifespan=lifespan)
+app = FastAPI(title="Ministros Voice Agent", lifespan=lifespan)
 
+_cors_wildcard = FRONTEND_ORIGINS == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # restrict to your domain in production
-    allow_credentials=True,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=not _cors_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,30 +64,23 @@ async def websocket_endpoint(websocket: WebSocket):
         websocket.client,
     )
 
-    # Accept ?lang=en-IN (default), ?agent=louie|automotive (default louie)
     language = websocket.query_params.get("lang", "en-IN")
-    agent = websocket.query_params.get("agent", "louie")
 
     try:
         transport, task, context = await create_pipeline(
-            websocket, language=language, agent=agent
+            websocket,
+            language=language,
+            session_id=session_id,
         )
 
         @transport.event_handler("on_client_connected")
         async def on_connected(t, ws):
-            logger.info(
-                "Pipeline running | session_id={} agent={}", session_id, agent
+            logger.info("Pipeline running | session_id={}", session_id)
+            greeting = (
+                "The user just connected. Greet them warmly — introduce yourself as "
+                "Ministros in one short sentence and ask how you can help. "
+                "Keep it natural and brief."
             )
-            if agent == "automotive":
-                from agents.automotive.prompts import get_toyota_connect_greeting
-
-                greeting = get_toyota_connect_greeting()
-            else:
-                greeting = (
-                    "The user just connected. Greet them warmly — introduce yourself as "
-                    "Louie in one short sentence and ask how you can help. "
-                    "Keep it natural and brief."
-                )
             context.messages.append({"role": "system", "content": greeting})
             await task.queue_frames([LLMContextFrame(context=context)])
 
@@ -127,13 +122,6 @@ if __name__ == "__main__":
     )
 
 
-# Serve car images — before catch-all client mount
-_images_dir = Path(__file__).resolve().parent.parent / "images"
-if _images_dir.is_dir():
-    app.mount("/images", StaticFiles(directory=str(_images_dir)), name="images")
-
 # Serve frontend — must be LAST (catches all remaining routes)
 _client_dir = Path(__file__).resolve().parent.parent / "client"
-app.mount(
-    "/", StaticFiles(directory=str(_client_dir), html=True), name="static"
-)
+app.mount("/", StaticFiles(directory=str(_client_dir), html=True), name="static")

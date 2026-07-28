@@ -4,5 +4,6 @@ __pycache__/
 *.pyo
 .venv/
 .uv/
-*.txt
 diagnostics/
+!requirements.txt
+
