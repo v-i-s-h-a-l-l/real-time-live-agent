@@ -1,3 +1,4 @@
-# Generated at build time on Vercel — do not commit secrets here.
-# Local / same-origin default is set in config.js if this stays empty.
-window.MINISTROS_WS_URL = window.MINISTROS_WS_URL || '';
+// Generated at build time on Vercel — overridden by `npm run build` when MINISTROS_WS_URL is set.
+// Fallback for production if env was missing at build time:
+window.MINISTROS_WS_URL =
+  window.MINISTROS_WS_URL || 'wss://real-time-live-agent.onrender.com/ws';
