@@ -279,11 +279,16 @@ Health checks:
 
 1. Push this repo to GitHub.
 2. Create a **Web Service**, root directory `real-time-live-agent`.
-3. **Build:** `pip install -r requirements.txt`  
+3. **Build:** `pip install --upgrade pip && pip install -r requirements.txt`  
 4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server`
 5. Use at least a **Standard (~2 GB)** instance — torch + voice stack is heavy for free tiers.
 6. Set secrets: `CEREBRAS_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `GROQ_API_KEY`, and later `FRONTEND_ORIGIN=https://your-app.vercel.app`.
-7. Confirm `https://YOUR-SERVICE.onrender.com/health`.
+7. Also set (avoids Rust/maturin read-only build failures):
+   - `CARGO_HOME=/opt/render/project/src/.cargo`
+   - `RUSTUP_HOME=/opt/render/project/src/.rustup`
+8. Confirm `https://YOUR-SERVICE.onrender.com/health`.
+
+**Root Directory:** leave **blank** (this GitHub repo is already the project root — do not set `real-time-live-agent`).
 
 Optional Blueprint: `render.yaml`.
 

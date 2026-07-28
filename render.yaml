@@ -1,18 +1,25 @@
 # Render Blueprint — Ministros voice backend
 # https://render.com/docs/blueprint-spec
+#
+# IMPORTANT: Root Directory must be EMPTY (repo root already is this project).
 services:
   - type: web
     name: ministros-voice
     runtime: python
     plan: standard   # free tier sleeps + often OOM with torch; use at least 2 GB RAM
-    region: singapore  # change if you prefer
+    region: singapore
     rootDir: .
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.10"
+      # Writable Cargo/Rust homes (fixes maturin "Read-only file system" on Render)
+      - key: CARGO_HOME
+        value: /opt/render/project/src/.cargo
+      - key: RUSTUP_HOME
+        value: /opt/render/project/src/.rustup
       - key: CEREBRAS_API_KEY
         sync: false
       - key: SARVAM_API_KEY
