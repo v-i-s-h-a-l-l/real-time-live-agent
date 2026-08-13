@@ -15,8 +15,9 @@ import re
 import random
 import unicodedata
 from collections import deque
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
+from loguru import logger
 from pipecat.frames.frames import (
     Frame,
     TextFrame,
@@ -26,6 +27,14 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import (
     FrameDirection,
     FrameProcessor,
+)
+
+from config import DEBUG_TTS_INPUT
+from processors.speak_math import (
+    ensure_math_y_speech,
+    math_delimiters_unclosed,
+    speak_for_tts,
+    speak_math_expr,
 )
 
 
@@ -75,11 +84,23 @@ _SEMANTIC_RULES: List[tuple[str, str]] = [
 # ─────────────────────────────────────────────────────────────
 
 _SYMBOL_MAP: List[tuple[re.Pattern, str]] = [
+    # spoken maths — apply before markdown stripping so meaning survives
+    (re.compile(r"±"),                " plus or minus "),
+    (re.compile(r"√"),                " square root of "),
+    # Superscripts are handled by speak_for_tts; keep these as a last-resort
+    # backup so Cartesia never sees a raw ²/³ (which it reads as "two"/"three").
+    (re.compile(r"²"),                " squared"),
+    (re.compile(r"³"),                " cubed"),
+    (re.compile(r"⁴"),                " to the fourth power"),
+    (re.compile(r"\^2\b"),            " squared"),
+    (re.compile(r"\^3\b"),            " cubed"),
+    (re.compile(r"\^4\b"),            " to the fourth power"),
     # ellipsis / multiple dots → natural pause comma
     (re.compile(r"\.{2,}"),           ", "),
     # markdown bold / italic / headers / hr
     (re.compile(r"\*{1,3}"),          ""),
-    (re.compile(r"_{1,3}"),           ""),
+    # double/triple underscore is markdown; keep single _ in identifiers like a_n
+    (re.compile(r"_{2,3}"),           ""),
     (re.compile(r"^#{1,6}\s*", re.M),""),
     (re.compile(r"^-{3,}$", re.M),   ""),
     # markdown list markers at line start (- item, * item, 1. item)
@@ -98,16 +119,65 @@ _SYMBOL_MAP: List[tuple[re.Pattern, str]] = [
     (re.compile(r" {2,}"),            " "),
 ]
 
+
+# Back-compat aliases used by tests and older call sites.
+speak_latex = speak_math_expr
+speak_math_delimiters = speak_for_tts
+
+
+def _insert_cartesia_pacing(text: str) -> str:
+    """Teacher-like pauses around formula clauses using punctuation only.
+
+    Cartesia may read <break> tags aloud, so we do not insert SSML.
+    """
+    if not text:
+        return text
+    text = re.sub(
+        r", (plus or minus)\b",
+        r". Plus or minus",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r", (all divided by)\b",
+        r". All divided by",
+        text,
+        flags=re.I,
+    )
+    return text
+
+
+def _log_math_speech_input(text: str) -> None:
+    if DEBUG_TTS_INPUT and text:
+        logger.info("MATH SPEECH INPUT: {}", text[:2000])
+
+
+def speak_newlines(text: str) -> str:
+    """Turn line breaks into spoken pauses. Never read 'new line' aloud."""
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"([.!?,;:—])[ \t]*\n+", r"\1 ", text)
+    text = re.sub(r"\n+", ". ", text)
+    return text
+
 # Robotic preamble phrases to strip from the START of a response.
 # Applied before symbol cleaning so the text is fresh.
 _ROBOTIC_PREAMBLES: List[re.Pattern] = [
     re.compile(r"^(As an AI[,.]?\s*)", re.I),
     re.compile(r"^(As a language model[,.]?\s*)", re.I),
-    re.compile(r"^(Certainly!\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
-    re.compile(r"^(Of course!\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
-    re.compile(r"^(Absolutely!\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
-    re.compile(r"^(Great question!\s*)", re.I),
-    re.compile(r"^(Sure thing!\s*)", re.I),
+    re.compile(r"^(Certainly[!.,]?\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
+    re.compile(r"^(Of course[!.,]?\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
+    re.compile(r"^(Absolutely[!.,]?\s*(I'?d be happy to (help|assist)\.?\s*)?)", re.I),
+    re.compile(r"^(Great question[!.,]?\s*)", re.I),
+    re.compile(r"^(That's a great question[!.,]?\s*)", re.I),
+    re.compile(r"^(Sure thing[!.,]?\s*)", re.I),
+    re.compile(r"^(Sure[!.,]\s*)", re.I),
+    re.compile(r"^(Awesome[!.,]?\s*)", re.I),
+    re.compile(r"^(Fantastic[!.,]?\s*)", re.I),
+    re.compile(r"^(Excellent[!.,]?\s*)", re.I),
+    re.compile(r"^(Let's dive in[!.,]?\s*)", re.I),
+    re.compile(r"^(I'?d be happy to (help|assist)[.!]?\s*)", re.I),
 ]
 
 # Mid-sentence robotic fragments to substitute.
@@ -175,10 +245,12 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         self,
         *,
         language: str = "en-IN",
+        get_language: Optional[Callable[[], str]] = None,
         add_starters: bool = True,
         min_chunk_length: int = _DEFAULT_MIN_CHUNK,
         starter_cooldown: int = 5,
         empty_starter_probability: float = 0.65,
+        on_interrupt_leftover: Optional[Callable[[str], None]] = None,
         **kwargs,
     ):
         """
@@ -187,6 +259,10 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         language : str
             BCP-47 language tag. "hi-IN" activates Hindi starters;
             everything else uses English starters.
+        get_language : callable, optional
+            Reads the LanguageTracker's active language so maths is rendered
+            for the voice that will actually speak it. Falls back to
+            ``language`` when absent.
         add_starters : bool
             Set False to disable starter injection entirely (useful in
             testing or when the TTS engine adds its own fillers).
@@ -197,11 +273,16 @@ class ResponseNaturalizerProcessor(FrameProcessor):
             How many turns to remember previous starters to avoid repetition.
         empty_starter_probability : float
             Probability of choosing no starter on neutral responses.
-            Range [0.0, 1.0]. Default 0.40 (40 % silence).
+            Range [0.0, 1.0]. Higher means fewer filler openings.
+        on_interrupt_leftover : callable, optional
+            Receives spoken leftover hold text when an interruption discards
+            an unflushed sentence, so incidental-resume can continue it.
         """
         super().__init__(**kwargs)
 
         self._starters = STARTERS_HI if language == "hi-IN" else STARTERS_EN
+        self._language = language
+        self._get_language = get_language
         self._add_starters = add_starters
         self._min_chunk = min_chunk_length
         self._empty_p = empty_starter_probability
@@ -210,6 +291,8 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         # Per-turn state
         self._buffer: str = ""
         self._starter_injected: bool = False
+        self._hold: str = ""
+        self._on_interrupt_leftover = on_interrupt_leftover
 
     # ── Semantic starter selection ───────────────────────────────────────────
 
@@ -268,6 +351,11 @@ class ResponseNaturalizerProcessor(FrameProcessor):
             text = pattern.sub(repl, text)
         return text.strip()
 
+    def _speech_language(self) -> str:
+        if self._get_language is not None:
+            return self._get_language() or self._language
+        return self._language
+
     def _clean(self, text: str) -> str:
         """Full cleaning pipeline. Returns empty string if nothing survives."""
         if not text or not text.strip():
@@ -284,14 +372,26 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         if not text:
             return ""
 
+        # 1b. Math notation → spoken English (transcript still has the original LLM text)
+        text = speak_for_tts(text, speech_language=self._speech_language())
+        text = _insert_cartesia_pacing(text)
+
+        # 1c. Stepped equations → spoken pauses (do not say "new line")
+        text = speak_newlines(text)
+
         # 2. Mid-sentence robotic substitutions
         text = self._apply_subs(text)
 
         # 3. TTS symbol normalisation
         text = self._apply_symbols(text)
 
+        # 3b. Last chance before Cartesia: mathematical y → "why"
+        text = ensure_math_y_speech(text)
+
         # 4. Collapse any leftover whitespace
         text = re.sub(r" {2,}", " ", text).strip()
+
+        _log_math_speech_input(text)
 
         # 5. Strip leading/trailing stray punctuation that reads badly aloud
         text = re.sub(r"^[,\-—;:]+\s*", "", text)
@@ -317,12 +417,16 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         if raw.strip() == _BACKGROUND_SENTINEL:
             return raw
 
-        lead = " " if raw[:1].isspace() else ""
-        trail = " " if raw[-1:].isspace() else ""
+        working = speak_newlines(raw)
+        lead = " " if working[:1].isspace() else ""
+        trail = " " if working[-1:].isspace() else ""
 
-        core = self._strip_preamble(raw.strip())
+        core = self._strip_preamble(working.strip())
+        core = speak_for_tts(core, speech_language=self._speech_language())
+        core = _insert_cartesia_pacing(core)
         core = self._apply_subs(core)
         core = self._apply_symbols(core)
+        core = ensure_math_y_speech(core)
         core = re.sub(r" {2,}", " ", core).strip()
 
         if not core:
@@ -331,6 +435,31 @@ class ResponseNaturalizerProcessor(FrameProcessor):
             return " " if (lead or trail) else ""
 
         return lead + core + trail
+
+    def _should_flush_hold(self) -> bool:
+        """Flush when a sentence, equation step, or math block is complete."""
+        hold = self._hold
+        if not hold.strip():
+            return False
+        if math_delimiters_unclosed(hold):
+            return False
+        if re.search(r"[\n.!?]\s*$", hold):
+            return True
+        if len(hold) >= 160 and hold[-1:].isspace():
+            return True
+        return False
+
+    async def _flush_hold(self, direction: FrameDirection) -> None:
+        raw = self._hold
+        self._hold = ""
+        if not raw.strip():
+            return
+        cleaned = self._clean(raw)
+        if cleaned:
+            # Each flush is a finished sentence. Without the trailing space the
+            # next flush welds onto it ("three.அப்பா"), and TTS reads that full
+            # stop as the word "dot" instead of a pause.
+            await self.push_frame(TextFrame(text=cleaned + " "), direction)
 
     # ── Turn state ───────────────────────────────────────────────────────────
 
@@ -341,6 +470,7 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         """
         self._buffer = ""
         self._starter_injected = False
+        self._hold = ""
 
     def _flush_buffer(self, direction: FrameDirection):
         """
@@ -375,12 +505,12 @@ class ResponseNaturalizerProcessor(FrameProcessor):
                 await self.push_frame(frame, direction)
                 return
 
-            # Simple path (programmatic starters disabled): clean each chunk
-            # while preserving the model's own whitespace, then stream it.
+            # Hold until a sentence or math block is complete so inequalities
+            # and formulas are spoken as a teacher would, not token-by-token.
             if not self._add_starters:
-                cleaned = self._clean_chunk(frame.text)
-                if cleaned:
-                    await self.push_frame(TextFrame(text=cleaned), direction)
+                self._hold += frame.text
+                if self._should_flush_hold():
+                    await self._flush_hold(direction)
                 return
 
             # Starter path (buffered): accumulate enough text to pick a starter.
@@ -413,6 +543,8 @@ class ResponseNaturalizerProcessor(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             # Edge case: entire response was shorter than min_chunk_length.
             # Flush whatever's left in the buffer before resetting.
+            if self._hold:
+                await self._flush_hold(direction)
             if self._buffer:
                 final = self._flush_buffer(direction)
                 if final:
@@ -423,9 +555,15 @@ class ResponseNaturalizerProcessor(FrameProcessor):
 
         # ── Interruption ─────────────────────────────────────────────────────
         elif isinstance(frame, InterruptionFrame):
-            # Hard reset — discard buffer entirely.
-            # Partial interrupted text must NEVER reach TTS.
+            leftover = self._hold
+            # Hard reset — partial interrupted text must not bleed into the
+            # next LLM turn. The leftover is handed to incidental-resume so a
+            # cough can continue the same sentence instead of dropping it.
             self._reset()
+            if leftover.strip() and self._on_interrupt_leftover is not None:
+                spoken = self._clean(leftover)
+                if spoken:
+                    self._on_interrupt_leftover(spoken)
             await self.push_frame(frame, direction)
 
         # ── All other frames pass through unchanged ───────────────────────────

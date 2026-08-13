@@ -1,0 +1,145 @@
+{
+  "$comment": "Contract for practice answer evaluation. Loaded by server/tests/test_practice.py and tutor-frontend/src/domain/practice/evaluation.test.ts so the Python tutor and the practice card can never drift apart.",
+  "cases": [
+    {
+      "name": "plain numeric answer in a different notation",
+      "student": "2 and 3",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "order of roots does not matter",
+      "student": "3, 2",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "hedged but correct",
+      "student": "I think it's 2 and 3",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "one root wrong",
+      "student": "I think 2 and 4",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "incorrect"
+    },
+    {
+      "name": "factored form shows understanding",
+      "student": "I factored it as (x - 2)(x - 3), but I'm not sure.",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "step-by-step reasoning with a complete answer",
+      "student": "I moved 5 across, so x squared is 9, then x is 3 or -3.",
+      "expected": "x = 3, -3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "step-by-step reasoning missing the negative root",
+      "student": "I moved 5 to the other side, so x squared equals 9. Then x is 3.",
+      "expected": "x = 3, -3",
+      "accepted": [],
+      "evaluation": "partially_correct"
+    },
+    {
+      "name": "accepted alternate phrasing",
+      "student": "q = 10, r = 35",
+      "expected": "455 = 42 × 10 + 35; q = 10, r = 35.",
+      "accepted": ["q = 10, r = 35", "10, 35"],
+      "evaluation": "correct"
+    },
+    {
+      "name": "decimal and fraction are the same number",
+      "student": "0.5",
+      "expected": "1/2",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "unicode minus is still a minus",
+      "student": "−3 and 3",
+      "expected": "x = 3, -3",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "wording answer without numbers",
+      "student": "The number is irrational.",
+      "expected": "It is irrational.",
+      "accepted": [],
+      "evaluation": "correct"
+    },
+    {
+      "name": "single wrong value",
+      "student": "5",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "incorrect"
+    },
+    {
+      "name": "asking for a hint is never a wrong answer",
+      "student": "Can you give me a hint?",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "hint_request"
+    },
+    {
+      "name": "saying you don't know is never a wrong answer",
+      "student": "I don't know.",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "needs_hint"
+    },
+    {
+      "name": "curly apostrophe still reads as don't know",
+      "student": "I don\u2019t know",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "needs_hint"
+    },
+    {
+      "name": "stuck is a request for help",
+      "student": "I'm stuck on this one.",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "needs_hint"
+    },
+    {
+      "name": "concept question is not an attempt",
+      "student": "Why do we use this formula?",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "conceptual_question"
+    },
+    {
+      "name": "vague noise is not scored",
+      "student": "yeah",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "ambiguous"
+    },
+    {
+      "name": "empty response is not scored",
+      "student": "   ",
+      "expected": "x = 2, 3",
+      "accepted": [],
+      "evaluation": "ambiguous"
+    },
+    {
+      "name": "no structured answer means the LLM decides",
+      "student": "2 and 3",
+      "expected": "",
+      "accepted": [],
+      "evaluation": "ambiguous"
+    }
+  ]
+}

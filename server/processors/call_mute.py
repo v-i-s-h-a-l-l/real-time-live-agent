@@ -10,13 +10,13 @@ Place this in the pipeline AFTER stt (TranscriptionFrame) and BEFORE user_aggreg
 """
 
 import re
+from collections.abc import Callable
+
 from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
-    TextFrame,
-    TTSSpeakFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 
@@ -40,17 +40,25 @@ MUTE_PATTERNS = [
 # ── Re-engagement phrases that bring the bot back ────────────────────────────
 
 UNMUTE_PATTERNS = [
-    r"\b(hey|hi|hello|okay|ok)\s*(i'?m?\s*)?(back|here|there|done|free)\b",
-    r"\bi'?m?\s*back\b",
+    # "I'm back" / "I am back" / "Im back" / "hey I am back"
+    r"\bi\s*(?:'?m|am)\s+back\b",
+    r"\b(hey|hi|hello|okay|ok|yo)[,.]?\s+i\s*(?:'?m|am)\s+back\b",
+    r"\b(hey|hi|hello|okay|ok)\s*(?:i'?m?\s*)?(back|here|there|done|free)\b",
+    # back after / from a call
+    r"\bback\s+(?:after|from)\s+(?:the\s+|my\s+|that\s+)?(?:call|phone)\b",
+    r"\bafter\s+(?:the\s+|my\s+|that\s+)?(?:call|phone)\b",
+    r"\b(?:done|finished)\s+with\s+(?:the\s+|my\s+)?(?:call|phone)\b",
+    r"\b(?:call|phone)\s+(?:is\s+)?(?:over|done|finished)\b",
     r"\bare\s+you\s+(there|here|still there|still here|listening)\b",
-    r"\b(ministros|ministro)\s*(are\s+you)?\s*(there|here|back)?\b",  # bot name variants
+    r"\b(ministros|ministro|assistant)\s*(are\s+you)?\s*(there|here|back)?\b",
     r"\bsorry\s+(about\s+that|for\s+that|to\s+keep\s+you)\b",
     r"\bback\s+at\s+it\b",
     r"\bwhere\s+were\s+we\b",
     r"\bstill\s+(there|here|with\s+me)\b",
     r"\byou\s+still\s+(there|here)\b",
     r"\bcan\s+you\s+hear\s+me\b",
-    r"\bhello\b",  # alone as a re-check
+    r"\b(?:i\s+)?(?:am\s+)?(?:back|free|done)\s+now\b",
+    r"^\s*(?:hello|hey|hi)\s*[.!]?\s*$",  # bare greeting while muted
 ]
 
 _MUTE_RE = [re.compile(p, re.IGNORECASE) for p in MUTE_PATTERNS]
@@ -68,15 +76,16 @@ class CallMuteProcessor(FrameProcessor):
     States
     ------
     unmuted (default) — all frames pass through normally
-    muted             — TranscriptionFrames are silently dropped;
-                        re-engagement phrases flip back to unmuted and
-                        inject a short TTSSpeakFrame to let the user know
-                        the bot is back.
+    muted             — TranscriptionFrames are silently dropped; a
+                        re-engagement phrase flips back to unmuted and the
+                        transcription carrying it is passed on, so the tutor
+                        answers it as an ordinary turn.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, should_skip_mute: Callable[[str], bool] | None = None, **kwargs):
         super().__init__(**kwargs)
         self._muted = False
+        self._should_skip_mute = should_skip_mute
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -107,6 +116,11 @@ class CallMuteProcessor(FrameProcessor):
 
         if not self._muted:
             # ── Currently UNMUTED ─────────────────────────────────────────
+            if self._should_skip_mute and self._should_skip_mute(text):
+                # Study-break duration answers like "one minute" must not
+                # be treated as a phone step-away.
+                await self.push_frame(frame, direction)
+                return
             if _matches(text, _MUTE_RE):
                 self._set_muted(f"trigger='{text}'")
                 # Let the frame pass once so the LLM can give a natural

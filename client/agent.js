@@ -60,7 +60,7 @@ class VoiceAgent {
     /* Public API                                                           */
     /* ------------------------------------------------------------------ */
 
-    async connect(lang = 'en-IN', extraParams = {}) {
+    async connect(lang = 'auto', extraParams = {}) {
         if (this.isConnected) {
             console.warn('[VoiceAgent] connect() ignored — session already active');
             return;

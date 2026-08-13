@@ -1,4 +1,5 @@
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -10,18 +11,25 @@ from loguru import logger
 from pipecat.frames.frames import LLMContextFrame
 from pipecat.pipeline.runner import PipelineRunner
 
-from config import CEREBRAS_API_KEY, SARVAM_API_KEY, FRONTEND_ORIGINS
+from config import config_warnings, missing_required_keys, FRONTEND_ORIGINS
+from opening import opening_system_message
 from pipeline import create_pipeline
+
+# Wait briefly for the browser to send session + learning context before greeting.
+_SESSION_CONTEXT_WAIT_SECS = 1.5
+_SESSION_CONTEXT_POLL_SECS = 0.05
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Voice Agent server starting up...")
+    logger.info("Voice Agent server starting up (Lumina tutor + selectable Cartesia voices)...")
+    for warning in config_warnings():
+        logger.warning(warning)
     yield
     logger.info("Voice Agent server shutting down.")
 
 
-app = FastAPI(title="Ministros Voice Agent", lifespan=lifespan)
+app = FastAPI(title="Lumina Voice Tutor", lifespan=lifespan)
 
 _cors_wildcard = FRONTEND_ORIGINS == ["*"]
 app.add_middleware(
@@ -40,17 +48,17 @@ async def health():
 
 @app.get("/ready")
 async def ready():
-    missing = []
-    if not CEREBRAS_API_KEY:
-        missing.append("CEREBRAS_API_KEY")
-    if not SARVAM_API_KEY:
-        missing.append("SARVAM_API_KEY")
+    missing = missing_required_keys()
     if missing:
         return JSONResponse(
             status_code=503,
             content={"status": "not_ready", "missing": missing},
         )
-    return {"status": "ready"}
+    payload: dict = {"status": "ready"}
+    warnings = config_warnings()
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
 
 
 @app.websocket("/ws")
@@ -64,24 +72,38 @@ async def websocket_endpoint(websocket: WebSocket):
         websocket.client,
     )
 
-    language = websocket.query_params.get("lang", "en-IN")
+    # Auto language: Sarvam STT language="unknown" + LanguageTracker
+    language = websocket.query_params.get("lang", "auto")
+    voice_id = websocket.query_params.get("voice")
+    logger.info(
+        "WS params | session_id={} lang={} voice={}",
+        session_id,
+        language,
+        voice_id,
+    )
 
     try:
-        transport, task, context = await create_pipeline(
+        transport, task, context, session_store = await create_pipeline(
             websocket,
             language=language,
             session_id=session_id,
+            voice_id=voice_id,
         )
 
         @transport.event_handler("on_client_connected")
         async def on_connected(t, ws):
             logger.info("Pipeline running | session_id={}", session_id)
-            greeting = (
-                "The user just connected. Greet them warmly — introduce yourself as "
-                "Ministros in one short sentence and ask how you can help. "
-                "Keep it natural and brief."
+            # Allow the client to deliver session_context before the first LLM turn.
+            waited = 0.0
+            while waited < _SESSION_CONTEXT_WAIT_SECS:
+                if session_store.applied and session_store.learning_context:
+                    break
+                await asyncio.sleep(_SESSION_CONTEXT_POLL_SECS)
+                waited += _SESSION_CONTEXT_POLL_SECS
+
+            context.add_message(
+                {"role": "system", "content": opening_system_message(session_store)}
             )
-            context.messages.append({"role": "system", "content": greeting})
             await task.queue_frames([LLMContextFrame(context=context)])
 
         @transport.event_handler("on_client_disconnected")
@@ -105,8 +127,13 @@ async def websocket_endpoint(websocket: WebSocket):
         )
         try:
             await websocket.close()
-        except Exception:
-            pass
+        except RuntimeError as close_err:
+            # Already closed by the transport — worth a trace, not a crash.
+            logger.debug(
+                "Socket already closed | session_id={} err={}",
+                session_id,
+                close_err,
+            )
 
 
 if __name__ == "__main__":
@@ -122,6 +149,7 @@ if __name__ == "__main__":
     )
 
 
-# Serve frontend — must be LAST (catches all remaining routes)
+# Leftover static page for engine-only debugging. The product UI is
+# tutor-frontend/ on :3000. This mount is last so it does not shadow /ws.
 _client_dir = Path(__file__).resolve().parent.parent / "client"
 app.mount("/", StaticFiles(directory=str(_client_dir), html=True), name="static")

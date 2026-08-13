@@ -15,7 +15,6 @@ to decay before returning to normal sensitivity.
 Place this processor BEFORE the VAD in the pipeline.
 """
 
-import math
 import asyncio
 import numpy as np
 from loguru import logger
@@ -42,13 +41,16 @@ class AudioGateProcessor(FrameProcessor):
         barge_in_rms:   RMS threshold to pass audio while gated.
                         Must be loud enough that echo doesn't reach it,
                         but low enough that a real voice does.
-                        Typical values:
-                          0.04–0.08  → too permissive, echo leaks through
-                          0.10–0.15  → good for laptop speakers
-                          0.15–0.25  → aggressive, only close/loud speech
-        decay_secs:     Seconds to stay in DECAY after bot stops speaking.
-                        Allows residual echo to die before reopening.
-                        0.35s is often too short — 0.5–0.6s recommended.
+                        Higher values reject echo better but make it harder
+                        to interrupt the tutor mid-sentence.
+        decay_secs:     Seconds to stay in DECAY after bot stops speaking,
+                        so residual echo dies before normal sensitivity
+                        returns. Longer values are safer against echo but
+                        delay how quickly the student can be heard again.
+
+    The defaults below are conservative. The shipped tuning lives in
+    pipeline.py, which favours responsive barge-in because the browser
+    already applies echo cancellation; change it there, not here.
     """
 
     def __init__(

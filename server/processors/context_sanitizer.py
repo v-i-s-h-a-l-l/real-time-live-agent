@@ -124,25 +124,37 @@ class ContextSanitizerProcessor(FrameProcessor):
             else:
                 merged.append(dict(msg))
 
-        self._context.messages[:] = merged
+        self._context.set_messages(merged)
 
     def _trim_history(self):
-        """Keep system prompt plus the most recent non-system messages."""
+        """Drop the oldest turns, keeping every message where it was placed.
+
+        Rebuilding as "all system messages, then history" used to move the
+        per-turn directive back to the front of the prompt, where the
+        conversation that follows it outweighs it — the reply drifts back to
+        English part-way through an answer, and the changing directive text
+        invalidates the cached prompt prefix for everything after it.
+        """
         messages = self._context.messages
         if len(messages) < 1:
             return
 
-        system_msgs = [m for m in messages if m.get("role") == "system"]
-        other_msgs = [m for m in messages if m.get("role") != "system"]
-
-        if len(other_msgs) <= self.MAX_HISTORY_MESSAGES:
+        other_count = sum(1 for m in messages if m.get("role") != "system")
+        if other_count <= self.MAX_HISTORY_MESSAGES:
             return
 
-        trimmed = other_msgs[-self.MAX_HISTORY_MESSAGES :]
-        before = len(other_msgs)
-        self._context.messages[:] = system_msgs + trimmed
+        to_drop = other_count - self.MAX_HISTORY_MESSAGES
+        kept: list[dict] = []
+        dropped = 0
+        for msg in messages:
+            if msg.get("role") != "system" and dropped < to_drop:
+                dropped += 1
+                continue
+            kept.append(msg)
+
+        self._context.set_messages(kept)
         logger.info(
             "[ContextSanitizer] Trimmed history {} → {} messages",
-            before,
-            len(trimmed),
+            other_count,
+            other_count - dropped,
         )

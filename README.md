@@ -1,6 +1,13 @@
-# Ministros
+# Lumina
 
-### Real-time voice AI that converses like a person — not a chatbot with speakers taped on.
+Class 10 Mathematics AI tutor with a live voice session. The student studies a lesson in the browser and talks to the tutor over a WebSocket.
+
+**Product UI:** `tutor-frontend/` (Next.js)  
+**Voice engine:** `server/` (FastAPI + Pipecat — Sarvam STT · Cerebras/Groq LLM · Cartesia TTS)
+
+Engineer overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+The engine can still stream a conversation like a phone call (barge-in, Smart Turn, spoken replies). The tutor layer on top of it keeps the session inside Class 10 maths.
 
 <p align="center">
   <a href="voice_agent_working.mp4">
@@ -262,9 +269,11 @@ cd real-time-live-agent\server
 
 If the venv is missing, create one with system Python 3.12 and install from `requirements.txt` / `voice-agent/pyproject.toml`.
 
-**4. Open**
+**4. Open the tutor**
 
-[http://localhost:8805/](http://localhost:8805/)
+[http://localhost:3000](http://localhost:3000) — Next.js app in `tutor-frontend/`.
+
+The voice engine is `ws://127.0.0.1:8805/ws`. A leftover static page at [http://localhost:8805/](http://localhost:8805/) talks to the same engine and is not the product UI.
 
 Health checks:
 
@@ -294,16 +303,10 @@ Optional Blueprint: `render.yaml`.
 
 ### Frontend → Vercel
 
-1. New project, root directory `real-time-live-agent/client`.
-2. Build: `npm run build` · Output: `.`
-3. Env: `MINISTROS_WS_URL=wss://YOUR-SERVICE.onrender.com/ws`
-4. Deploy and open the Vercel URL.
-
-Quick override without rebuild:
-
-```text
-https://your-app.vercel.app/?ws=wss://YOUR-SERVICE.onrender.com/ws
-```
+1. New project, root directory `real-time-live-agent/tutor-frontend`.
+2. Build: `npm run build`.
+3. Env: `NEXT_PUBLIC_VOICE_WS_URL=wss://YOUR-SERVICE.onrender.com/ws`
+4. Deploy and open the Vercel URL. Set `FRONTEND_ORIGIN` on the backend to that origin.
 
 ---
 
@@ -317,7 +320,7 @@ Ministros is prompted and post-processed to behave like a phone call:
 - Follow-ups keep prior **intent** when you only change a detail (“London” after “weather in the US”)
 - Name-only pings get a short “I’m here,” not a sales pitch
 
-That personality lives in `server/pipeline.py` (`get_system_prompt`) and `processors/naturalizer.py`.
+That personality lives in `server/tutor/prompts.py` and `server/processors/naturalizer.py`. Maths is spoken by `server/processors/speak_math.py` without an extra LLM call.
 
 ---
 
@@ -349,9 +352,10 @@ Additional guards:
 | `SARVAM_API_KEY` | yes | Speech-to-text |
 | `CARTESIA_API_KEY` | yes | Text-to-speech |
 | `GROQ_API_KEY` | recommended | LLM failover |
-| `FRONTEND_ORIGIN` | prod | CORS allowlist for Vercel origin(s) |
+| `FRONTEND_ORIGIN` | prod | CORS allowlist for the Next.js origin(s) |
 | `HOST` / `PORT` | no | Bind address (Render injects `PORT`) |
-| `MINISTROS_WS_URL` | Vercel | `wss://…/ws` for the static client |
+| `ENVIRONMENT` | prod | Set to `production` to disable debug TTS text logs |
+| `NEXT_PUBLIC_VOICE_WS_URL` | Vercel | `wss://…/ws` for the Next.js tutor UI |
 
 ---
 
@@ -371,6 +375,6 @@ Built on [Pipecat](https://github.com/pipecat-ai/pipecat), Sarvam, Cerebras, Gro
 ---
 
 <p align="center">
-  <strong>Ministros</strong> — talk to your software the way you’d talk to a person.<br/>
+  <strong>Lumina</strong> — a Class 10 maths tutor you can actually talk to.<br/>
   <sub>Questions or improvements? Open an issue on the repo.</sub>
 </p>

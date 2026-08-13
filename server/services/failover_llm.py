@@ -25,6 +25,14 @@ from pipecat.services.cerebras.llm import CerebrasLLMService
 from pipecat.services.settings import assert_given
 
 
+def _fail_fast(client):
+    """Drop the SDK's own retry/backoff so failover happens on the first refusal."""
+    try:
+        return client.with_options(max_retries=0)
+    except Exception:  # pragma: no cover - older SDKs
+        return client
+
+
 class FallbackProvider(TypedDict):
     """Config for one fallback OpenAI-compatible provider."""
 
@@ -55,9 +63,17 @@ class FailoverLLMService(CerebrasLLMService):
     ):
         super().__init__(api_key=api_key, settings=settings, **kwargs)
 
+        # The OpenAI SDK retries a rate-limited request twice with exponential
+        # backoff (and honours Retry-After) before raising. On a live voice turn
+        # that is seconds of silence spent waiting on a provider that has already
+        # said no. This class *is* the retry policy: fail fast, switch provider.
+        self._client = _fail_fast(self._client)
+
         self._fallbacks = []
         for fb in fallbacks or []:
-            client = self.create_client(api_key=fb["api_key"], base_url=fb["base_url"])
+            client = _fail_fast(
+                self.create_client(api_key=fb["api_key"], base_url=fb["base_url"])
+            )
             self._fallbacks.append(
                 {"name": fb["name"], "client": client, "model": fb["model"]}
             )
@@ -82,6 +98,23 @@ class FailoverLLMService(CerebrasLLMService):
             convert_developer_to_user=not self.supports_developer_role,
         )
         params = self.build_chat_completion_params(params_from_context)
+        roles = [m.get("role") for m in params.get("messages") or [] if isinstance(m, dict)]
+        markers = []
+        for m in params.get("messages") or []:
+            if not isinstance(m, dict) or m.get("role") != "system":
+                continue
+            content = m.get("content") or ""
+            if not isinstance(content, str):
+                continue
+            for marker in ("[SESSION_CONTEXT]", "[LEARNING_CONTEXT]", "[TUTOR_TURN]", "Lumina", "Ministros"):
+                if marker in content and marker not in markers:
+                    markers.append(marker)
+        logger.info(
+            "[FailoverLLM] invocation markers={} roles={} fallbacks={}",
+            markers,
+            roles[:12],
+            [f["name"] for f in self._fallbacks],
+        )
 
         # 1. Primary (Cerebras)
         try:

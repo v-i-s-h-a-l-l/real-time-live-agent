@@ -95,7 +95,7 @@ class RepeatDetectorProcessor(FrameProcessor):
                             f"Just say it again as if you're saying it for the first time, naturally."
                         ),
                     }
-                    self._context.messages.append(hint)
+                    self._context.add_message(hint)
 
                     logger.info(
                         "[RepeatDetector] Repeat intent detected — hint injected into context | last_msg='{}'",
