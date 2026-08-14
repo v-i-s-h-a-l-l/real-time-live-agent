@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toVoiceSessionPayload } from "@/domain/curriculum/sessionContext";
 import type { TutorSessionContext } from "@/domain/curriculum/types";
-import { VOICE_DEFAULT_LANG, VOICE_WS_URL } from "@/lib/voice";
+import { VOICE_DEFAULT_LANG, VOICE_WS_URL } from "@/lib/config";
 import { VoiceAgentClient } from "@/lib/voice/VoiceAgentClient";
 import { mintVoiceToken } from "@/lib/voice/sessionToken";
 import {

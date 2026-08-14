@@ -1,0 +1,62 @@
+# Docker build context is the repository root.
+# Keep the context small and never copy secrets or frontend sources.
+
+.git
+.github
+.gitignore
+
+# Secrets — never bake into the image
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Virtualenvs and caches
+.venv
+**/.venv
+venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.next
+**/node_modules
+.uv
+
+# Frontend (Vercel) — not part of the Render image
+tutor-frontend
+
+# Local Python project / lockfiles not used by production pip
+voice-agent
+
+# Debug UI (dev-only; not mounted in production)
+client
+
+# Tests and local tools — not needed at runtime
+server/tests
+server/scripts
+server/.pytest_cache
+
+# Ephemeral / generated data
+server/data
+diagnostics
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+logs
+tmp
+temp
+*.wav
+*.mp3
+*.pcm
+
+# Docs and media (not required to run FastAPI)
+docs
+*.md
+!server/README.md
+*.mp4

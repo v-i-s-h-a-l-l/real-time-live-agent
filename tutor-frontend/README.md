@@ -52,7 +52,7 @@ Auth and voice tickets: browser → Vercel `/api/*` → Render HTTP API.
 | Module | Purpose |
 |--------|---------|
 | [`src/lib/api.ts`](./src/lib/api.ts) | Server-side Render HTTP proxy |
-| [`src/lib/voice.ts`](./src/lib/voice.ts) | WebSocket URL + voice constants |
+| [`src/lib/config.ts`](./src/lib/config.ts) | WebSocket URL + public voice constants |
 
 ## Scripts
 

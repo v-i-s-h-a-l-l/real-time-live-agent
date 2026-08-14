@@ -1,7 +1,14 @@
-# Render Blueprint — Ministros voice backend
+# Render Blueprint — Lumina voice backend
 # https://render.com/docs/blueprint-spec
 #
+# Default: native Python (existing). To deploy the Docker image instead:
+#   runtime: docker
+#   dockerfilePath: ./server/Dockerfile
+#   dockerContext: .
+# and remove buildCommand / startCommand (the image ENTRYPOINT binds 0.0.0.0:$PORT).
+#
 # IMPORTANT: Root Directory must be EMPTY (repo root already is this project).
+# Secrets (API keys, SESSION_SECRET) stay sync: false — never commit values.
 services:
   - type: web
     name: ministros-voice

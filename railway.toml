@@ -1,0 +1,11 @@
+# Railway / Railpack — FastAPI lives in server/, not the repo root.
+# https://docs.railway.com/guides/config-as-code
+
+[build]
+builder = "RAILPACK"
+
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

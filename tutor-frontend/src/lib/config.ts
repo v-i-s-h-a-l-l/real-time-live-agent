@@ -25,3 +25,18 @@ if (_prodWsInsecure) {
 
 /** AudioWorklet module URL (served from /public). */
 export const AUDIO_WORKLET_URL = "/audio-processor.js";
+
+/** Build voice WebSocket URL with optional query params. */
+export function voiceWebSocketUrl(params?: {
+  lang?: string;
+  voice?: string;
+}): string {
+  const base = VOICE_WS_URL;
+  if (!params?.lang && !params?.voice) {
+    return base;
+  }
+  const url = new URL(base);
+  if (params.lang) url.searchParams.set("lang", params.lang);
+  if (params.voice) url.searchParams.set("voice", params.voice);
+  return url.toString();
+}

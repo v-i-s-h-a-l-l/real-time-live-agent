@@ -1,4 +1,4 @@
-import { AUDIO_WORKLET_URL } from "@/lib/voice";
+import { AUDIO_WORKLET_URL } from "@/lib/config";
 import {
   INTERRUPT_DEBOUNCE_MS,
   MIC_HEALTH_CHECK_MS,

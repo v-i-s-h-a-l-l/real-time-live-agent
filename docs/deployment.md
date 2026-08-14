@@ -71,10 +71,35 @@ healthCheckPath: /health
 
 ### Docker (optional)
 
+Production image: [`server/Dockerfile`](../server/Dockerfile) (multi-stage, non-root, CPU torch).
+
 ```bash
-docker build -f server/Dockerfile -t lumina-voice .
-docker run -e PORT=8805 -p 8805:8805 --env-file .env lumina-voice
+docker build -f server/Dockerfile -t lumina-backend .
+docker run --rm -e PORT=8805 -p 8805:8805 --env-file .env lumina-backend
 ```
+
+Render: set runtime to **Docker**, Dockerfile Path `server/Dockerfile`, context `.`. The container ENTRYPOINT binds `0.0.0.0:$PORT`. Do not bake secrets into the image.
+
+## Backend — Railway (Railpack)
+
+Railpack detects Python at the **repo root** and looks for `main.py` / `app.py` there. This app is `server/main.py`, so a start command is required.
+
+[`railway.toml`](../railway.toml) and [`Procfile`](../Procfile):
+
+```
+uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server
+```
+
+| Setting | Value |
+|---------|-------|
+| Root directory | repository root (where `requirements.txt` is) |
+| Custom start command | same uvicorn line as above (dashboard fallback) |
+| Health check | `GET /health` |
+| RAM | ≥2 GB |
+
+If the dashboard still has no start command, set **Settings → Deploy → Custom Start Command** to that uvicorn line and redeploy.
+
+---
 
 ### Health endpoints
 
@@ -177,7 +202,7 @@ There is **no** `NEXT_PUBLIC_API_URL` by design: the browser calls same-origin `
 | File | Use |
 |------|-----|
 | [`src/lib/api.ts`](../tutor-frontend/src/lib/api.ts) | `backendJson`, `voiceApiUrl` — API routes only |
-| [`src/lib/voice.ts`](../tutor-frontend/src/lib/voice.ts) | `VOICE_WS_URL`, WebSocket helpers — browser |
+| [`src/lib/config.ts`](../tutor-frontend/src/lib/config.ts) | `VOICE_WS_URL`, WebSocket helpers — browser |
 
 ---
 

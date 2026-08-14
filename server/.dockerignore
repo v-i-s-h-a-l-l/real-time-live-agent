@@ -1,0 +1,21 @@
+# Used when the build context is server/. Production builds use the
+# repository-root .dockerignore (docker build -f server/Dockerfile .).
+
+.git
+.env
+.env.*
+!.env.example
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+tests
+scripts
+data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+*.wav
+*.pcm

@@ -31,14 +31,22 @@ Use [`../render.yaml`](../render.yaml) Blueprint or manual Web Service:
 
 Set environment variables from [`.env.example`](../.env.example) in the Render dashboard.
 
-## Docker (optional)
+## Docker (Render)
 
-Build from **repository root**:
+Multi-stage CPU image: [`Dockerfile`](./Dockerfile). Build from **repository root** (needs `requirements.txt`):
 
 ```bash
-docker build -f server/Dockerfile -t lumina-voice .
-docker run --env-file .env -p 8805:8805 -e PORT=8805 lumina-voice
+docker build -f server/Dockerfile -t lumina-backend .
+docker run --rm -e PORT=8805 -p 8805:8805 --env-file .env lumina-backend
 ```
+
+- Listens on `0.0.0.0:$PORT` (Render injects `PORT`; local default 8805)
+- Runs as non-root user `lumina`
+- Secrets come from environment variables — `.env` is not copied into the image
+- Optional RNNoise: `librnnoise.so` is installed from the `pyrnnoise` wheel (`--no-deps`); enable with `RNNOISE_ENABLED=true`
+- Health: `GET /health` (also Docker `HEALTHCHECK`)
+
+On Render, either keep native Python (`render.yaml`) or switch the service to **Docker** with Dockerfile Path `server/Dockerfile` and context `.`.
 
 ## Environment
 

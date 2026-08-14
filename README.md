@@ -460,7 +460,7 @@ Class 10
 | Routes | `src/app/` — dashboard, auth, subject/chapter/topic hierarchy |
 | API BFF | `src/app/api/` — auth, voice session, practice, tutor-context |
 | Voice client | `src/lib/voice/VoiceAgentClient.ts` + `useVoiceSession` hook |
-| Voice config | `src/lib/voice.ts` — WebSocket URL centralization |
+| Voice config | `src/lib/config.ts` — WebSocket URL centralization |
 | Backend proxy | `src/lib/api.ts` → `src/lib/server/backendApi.ts` |
 | Curriculum | `src/content/curriculum/`, `src/services/curriculum/` |
 | Domain logic | `src/domain/lesson/`, `src/domain/practice/`, `src/domain/curriculum/` |
