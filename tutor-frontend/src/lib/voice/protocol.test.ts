@@ -37,6 +37,7 @@ describe("websocket protocol", () => {
     expect(ServerEvent.breakCancelled).toBe("break_cancelled");
     expect(ServerEvent.breakRequesting).toBe("break_requesting");
     expect(ServerEvent.breakMessage).toBe("break_message");
+    expect(ServerEvent.safetyAlert).toBe("safety_alert");
     expect(ServerEvent.practiceProgress).toBe("practice_progress");
   });
 

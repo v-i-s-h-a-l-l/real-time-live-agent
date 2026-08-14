@@ -566,6 +566,16 @@ export class VoiceAgentClient {
         });
         break;
 
+      case ServerEvent.safetyAlert:
+        this.events.onSafetyAlert?.({
+          type,
+          category: optionalString(msg, data, "category"),
+          severity: optionalString(msg, data, "severity"),
+          timestamp: optionalNumber(msg, data, "timestamp"),
+          spoken: optionalString(msg, data, "spoken"),
+        });
+        break;
+
       case ServerEvent.practiceProgress:
         this.events.onPracticeProgress?.({
           ...(msg as unknown as Record<string, unknown>),

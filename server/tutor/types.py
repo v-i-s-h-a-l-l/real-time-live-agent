@@ -28,6 +28,7 @@ class StudentIntent(str, Enum):
     TOPIC_CHANGE = "topic_change"
     UNRELATED = "unrelated"
     GREETING = "greeting"
+    FAQ = "faq"
     UNKNOWN = "unknown"
 
 
@@ -146,6 +147,10 @@ class TutorDecision:
     evaluation: str | None = None
     #: Hint ladder rung to use this turn: 0 = none, 4 = work it through together.
     hint_level: int = 0
+    #: Matched product FAQ id, when this turn is a capability question.
+    faq_id: str | None = None
+    #: Grounded FAQ answer. The LLM may paraphrase this, not invent extras.
+    faq_answer: str | None = None
 
 
 def _as_str(value: Any) -> str | None:

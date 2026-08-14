@@ -22,8 +22,8 @@ export type ClientMessageType =
 
 /**
  * Events the engine sends on the voice WebSocket.
- * RTVI events come from Pipecat; `break_*` events are application messages
- * on the same socket.
+ * RTVI events come from Pipecat; `break_*` and `safety_alert` are
+ * application messages on the same socket.
  */
 export const ServerEvent = {
   botReady: "bot-ready",
@@ -43,6 +43,7 @@ export const ServerEvent = {
   breakCancelled: "break_cancelled",
   breakRequesting: "break_requesting",
   breakMessage: "break_message",
+  safetyAlert: "safety_alert",
   practiceProgress: "practice_progress",
 } as const;
 

@@ -957,6 +957,29 @@ input {
   white-space: nowrap;
 }
 
+.safety-status-chip {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.safety-concern {
+  flex: none;
+  margin-top: var(--space-3);
+}
+
+.safety-concern-label {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(168, 106, 29, 0.28);
+  background: rgba(168, 106, 29, 0.08);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
 .break-timer {
   flex: none;
   margin-top: var(--space-3);

@@ -65,6 +65,13 @@ export interface VoiceAgentClientEvents {
     startedAt?: number | null;
     endsAt?: number | null;
   }) => void;
+  onSafetyAlert?: (event: {
+    type: string;
+    category?: string;
+    severity?: string;
+    timestamp?: number | null;
+    spoken?: string;
+  }) => void;
   /** Adaptive practice state mirror. Shape is validated in the practice domain. */
   onPracticeProgress?: (event: Record<string, unknown>) => void;
 }

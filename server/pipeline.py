@@ -73,8 +73,10 @@ from processors.client_interrupt import ClientInterruptProcessor
 from processors.session_context import SessionContextProcessor, SessionContextStore
 from processors.tutor_turn import TutorTurnProcessor
 from processors.study_break import StudyBreakProcessor
+from processors.safety import SafetyProcessor
 from processors.text_input import TextInputProcessor
 from tutor.breaks import BreakStore
+from tutor.safety import SafetyStore
 from tutor.prompts import get_tutor_system_prompt
 from processors.turn_reset import TurnResetProcessor
 from processors.turn_logger import TurnLifecycleProcessor
@@ -238,6 +240,7 @@ async def create_pipeline(
     )
 
     break_store = BreakStore()
+    safety_store = SafetyStore()
     call_mute = CallMuteProcessor(should_skip_mute=break_store.should_skip_mute)
     transcription_dedup = TranscriptionDedupProcessor()
     llm_inference_dedup = LLMInferenceDedupProcessor()
@@ -317,7 +320,15 @@ async def create_pipeline(
         session_id=sid,
     )
     # After text_input / user aggregator so voice and typed turns share one
-    # intercept. Not on the PCM / VAD / STT path.
+    # intercept. Not on the PCM / VAD / STT path. Safety runs first so a
+    # crisis turn is never treated as study-break chatter.
+    safety = SafetyProcessor(
+        store=safety_store,
+        llm_context=context,
+        session_store=session_store,
+        session_id=sid,
+        get_language=lambda: language_tracker.current_language,
+    )
     study_break = StudyBreakProcessor(
         store=break_store,
         llm_context=context,
@@ -349,6 +360,7 @@ async def create_pipeline(
             incidental_gate,  # cough/noise → resume leftover TTS; real speech barges in
             user_aggregator,
             text_input,  # Typed chat → same LLMContext + Tutor Engine
+            safety,  # Crisis intercept; regex only, not on the audio path
             study_break,  # 1–5 min study break; LLM turns only, not audio
             tutor_turn,  # Tutor Engine: intent/mode → [TUTOR_TURN] directive
             turn_logger,

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from tutor.intent import is_help_request, is_interrupt_style, is_simple_factual
+from tutor.faq import FAQEntry
+from tutor.intent import is_interrupt_style, is_simple_factual
 from tutor.practice import MAX_HINT_LEVEL, AnswerEvaluation, PracticeSnapshot
 from tutor.scope import (
     APPLICATION_DOMAIN,
@@ -200,9 +201,10 @@ class ConversationPolicy:
         utterance: str,
         tutor_context: dict[str, Any] | None = None,
         practice: PracticeSnapshot | None = None,
+        faq: FAQEntry | None = None,
     ) -> TutorDecision:
-        if is_help_request(utterance):
-            return self._help()
+        if faq is not None:
+            return self._apply_depth(self._faq(faq), state)
         if practice is not None and phase == "practice":
             adaptive = self._adaptive_practice(intent, practice)
             if adaptive is not None:
@@ -225,19 +227,24 @@ class ConversationPolicy:
             return None
         return builder(intent, practice)
 
-    def _help(self) -> TutorDecision:
+    def _faq(self, entry: FAQEntry) -> TutorDecision:
         return TutorDecision(
-            intent=StudentIntent.EXPLANATION,
+            intent=StudentIntent.FAQ,
             mode=TeachingMode.LEARN,
             move=ConversationMove.ANSWER_DIRECT,
             response_length=ResponseLength.SHORT,
             strategy=(
-                "They asked how you can help. In one or two spoken sentences, say you can "
-                "explain the current lesson, answer questions, give hints, and practice with them. "
-                "Do not mention accounts, payments, banking, or customer support. "
-                "Vary the wording; do not recite a script."
+                "They asked a product FAQ, not a lesson question. Speak the FAQ "
+                "answer in the student's language, teacher-like and concise. "
+                "You may paraphrase, but do not add capabilities, subjects, "
+                "classes, or tools that are not in the FAQ. Do not mention "
+                "accounts, payments, banking, or customer support. Do not teach "
+                "the current slide this turn."
             ),
             check_understanding=False,
+            notes=("faq_knowledge",),
+            faq_id=entry.id,
+            faq_answer=entry.answer,
         )
 
     def _greet(
@@ -782,6 +789,8 @@ class ConversationPolicy:
         )
 
     def _apply_depth(self, decision: TutorDecision, state: TutorState) -> TutorDecision:
+        if decision.intent == StudentIntent.FAQ:
+            return decision
         pref = state.depth_preference
         if decision.response_length == ResponseLength.MICRO:
             return decision
@@ -811,4 +820,8 @@ class ConversationPolicy:
             use_next_hint=decision.use_next_hint,
             check_understanding=decision.check_understanding,
             notes=tuple(extra),
+            evaluation=decision.evaluation,
+            hint_level=decision.hint_level,
+            faq_id=decision.faq_id,
+            faq_answer=decision.faq_answer,
         )

@@ -12,6 +12,7 @@ from languages import (
     display_name,
     normalize_session_lang,
 )
+from tutor.faq import FAQ_KNOWLEDGE_MARKER
 from tutor.practice import (
     AnswerEvaluation,
     MasteryLevel,
@@ -19,7 +20,7 @@ from tutor.practice import (
     difficulty_to_label,
     hint_for_level,
 )
-from tutor.types import ResponseLength, TeachingMode, TutorDecision, TutorState
+from tutor.types import ResponseLength, StudentIntent, TeachingMode, TutorDecision, TutorState
 
 TUTOR_TURN_MARKER = "[TUTOR_TURN]"
 
@@ -301,22 +302,38 @@ def build_tutor_turn_directive(
         f"- Confusion streak: {state.confusion_streak}",
     ]
 
-    if decision.response_length != ResponseLength.MICRO:
+    is_faq = decision.intent == StudentIntent.FAQ and bool(decision.faq_answer)
+    if is_faq:
+        lines.extend(
+            [
+                f"- {FAQ_KNOWLEDGE_MARKER} id={decision.faq_id}: {decision.faq_answer}",
+                "- Answer ONLY from that FAQ. Do not invent extra capabilities, "
+                "subjects, classes, or tools. This knowledge is separate from the lesson.",
+                "- Do not teach the current slide this turn.",
+            ]
+        )
+
+    if decision.response_length != ResponseLength.MICRO and not is_faq:
         lines.append(
             "- Teach out loud: meaning in spoken sentences. If a formula must be seen, one short $...$ line only — never \\[ \\], never a paragraph of symbols. Say inequalities in words."
         )
 
-    if state.current_section_title:
+    if state.current_section_title and not is_faq:
         lines.append(f"- Current section on screen: {state.current_section_title}")
-    if state.current_question_id:
+    if state.current_question_id and not is_faq:
         lines.append(f"- Current practice question id: {state.current_question_id}")
-    lines.append(f"- Hints already used this question: {state.hints_used}")
-    if state.last_confusion_focus:
+    if not is_faq:
+        lines.append(f"- Hints already used this question: {state.hints_used}")
+    if state.last_confusion_focus and not is_faq:
         lines.append(f"- Recent confusion focus: {state.last_confusion_focus}")
-    if state.last_student_answer:
+    if state.last_student_answer and not is_faq:
         lines.append(f"- Latest student answer: {state.last_student_answer}")
 
-    if learning_context:
+    if is_faq:
+        lines.append(
+            "- Lesson slide content is omitted this turn so the FAQ cannot mix with tutoring."
+        )
+    elif learning_context:
         visible = (learning_context.get("visibleContent") or "").strip()
         question = (learning_context.get("question") or "").strip()
         if visible:
@@ -337,10 +354,10 @@ def build_tutor_turn_directive(
             "- No active on-screen section is available yet. Stay a Class 10 maths tutor; do not invent a random slide."
         )
 
-    if practice is not None and state.phase == "practice":
+    if practice is not None and state.phase == "practice" and not is_faq:
         lines.extend(_practice_lines(decision, practice))
 
-    if tutor_context and state.phase == "practice":
+    if tutor_context and state.phase == "practice" and not is_faq:
         hints = tutor_context.get("hints") or []
         if decision.use_next_hint and isinstance(hints, list) and hints:
             # hint_level is the ladder rung for this turn; hints_used is the legacy counter.
@@ -387,6 +404,10 @@ def build_tutor_turn_directive(
             elif note == "contextual_no":
                 lines.append(
                     "- They said no. Stay in mathematics. Do not pause tutoring or open general chat."
+                )
+            elif note == "faq_knowledge":
+                lines.append(
+                    "- Product FAQ: paraphrase the FAQ knowledge above. Do not add features."
                 )
             else:
                 lines.append(f"- Note: {note}")

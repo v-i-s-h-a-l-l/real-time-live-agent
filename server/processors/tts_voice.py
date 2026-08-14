@@ -10,6 +10,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     TextFrame,
+    TTSSpeakFrame,
     TTSUpdateSettingsFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -83,7 +84,7 @@ class TtsApplyVoiceProcessor(FrameProcessor):
             if isinstance(frame, LLMFullResponseEndFrame):
                 self._store.skip_tts_next_response = False
 
-        if isinstance(frame, (LLMFullResponseStartFrame, TTSUpdateSettingsFrame)):
+        if isinstance(frame, (LLMFullResponseStartFrame, TTSSpeakFrame, TTSUpdateSettingsFrame)):
             voice_id = resolve_tts_voice_id(self._store.tts_voice_id)
             if voice_id != self._applied:
                 self._applied = voice_id

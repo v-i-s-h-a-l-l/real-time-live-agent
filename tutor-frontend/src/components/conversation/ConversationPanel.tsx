@@ -14,12 +14,14 @@ import {
 import { TutorMarkdown } from "@/components/conversation/TutorMarkdown";
 import { IconMic, IconSend } from "@/components/ui/Icons";
 import { BreakStatusChip } from "@/components/lesson/BreakTimer";
+import { SafetyStatusChip } from "@/components/lesson/SafetyConcernBanner";
 import {
   isNearBottom,
   resolveScrollIntent,
   type ConversationMessage,
 } from "@/lib/voice/conversation";
 import type { StudyBreakView } from "@/lib/voice/studyBreak";
+import type { SafetyAlertView } from "@/lib/voice/safetyAlert";
 
 const STARTERS = [
   "Explain this concept",
@@ -44,6 +46,7 @@ export function ConversationPanel({
   onVoiceResponsesChange,
   onSend,
   studyBreak,
+  safetyAlert,
 }: {
   messages: ConversationMessage[];
   disabled: boolean;
@@ -56,6 +59,7 @@ export function ConversationPanel({
   onVoiceResponsesChange: (enabled: boolean) => void;
   onSend: (text: string) => boolean;
   studyBreak: StudyBreakView;
+  safetyAlert: SafetyAlertView;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -156,6 +160,7 @@ export function ConversationPanel({
       <header className="conversation-head">
         <h2>Conversation</h2>
         <div className="conversation-head-meta">
+          <SafetyStatusChip safetyAlert={safetyAlert} />
           <BreakStatusChip studyBreak={studyBreak} />
           <label className="conversation-speak" htmlFor={speakId}>
             <input

@@ -310,6 +310,32 @@ describe("VoiceAgentClient RTVI events", () => {
     expect(deltas).toEqual([]);
   });
 
+  it("forwards safety alerts without using the LLM transcript callbacks", () => {
+    const alerts: Array<{ type: string; category?: string }> = [];
+    const deltas: string[] = [];
+    const client = new VoiceAgentClient(
+      { wsUrl: "ws://127.0.0.1:9/ws" },
+      {
+        onAssistantText: (delta) => deltas.push(delta),
+        onSafetyAlert: (event) =>
+          alerts.push({ type: event.type, category: event.category }),
+      },
+    );
+
+    client.handleServerEvent({
+      type: ServerEvent.safetyAlert,
+      data: {
+        category: "self_harm",
+        severity: "high",
+        timestamp: 1_700_500,
+        spoken: "I'm really sorry you're feeling this way.",
+      },
+    });
+
+    expect(alerts).toEqual([{ type: "safety_alert", category: "self_harm" }]);
+    expect(deltas).toEqual([]);
+  });
+
   it("does not send text_input when the socket is closed", () => {
     const client = new VoiceAgentClient({ wsUrl: "ws://127.0.0.1:9/ws" });
     expect(client.sendTextInput("Hello")).toBe(false);

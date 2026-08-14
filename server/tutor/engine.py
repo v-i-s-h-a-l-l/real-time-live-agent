@@ -6,6 +6,7 @@ from typing import Any
 
 from loguru import logger
 
+from tutor.faq import match_faq
 from tutor.intent import detect_intent, is_interrupt_style
 from tutor.policy import ConversationPolicy
 from tutor.practice import (
@@ -80,7 +81,12 @@ class TutorEngine:
             phase = str(learning_context["phase"])
 
         intent = detect_intent(utterance, phase=phase)
+        faq = match_faq(utterance)
+        if faq is not None:
+            intent = StudentIntent.FAQ
         intent = apply_domain_scope(intent, utterance, state)
+        if intent != StudentIntent.FAQ:
+            faq = None
         practice = self._track_practice(
             intent,
             phase=phase,
@@ -96,6 +102,7 @@ class TutorEngine:
             utterance=utterance,
             tutor_context=tutor_context,
             practice=practice,
+            faq=faq,
         )
 
         self._update_state(state, decision, utterance)
@@ -103,7 +110,7 @@ class TutorEngine:
         logger.info(
             "[TutorEngine] domain={} intent={} move={} length={} mode={} phase={} topic={} section={} "
             "question={} confusion={} hints={} depth={} off_topic={} reveal={} interrupt={} "
-            "evaluation={} hint_level={}",
+            "evaluation={} hint_level={} faq={}",
             APPLICATION_DOMAIN,
             decision.intent.value,
             decision.move.value,
@@ -121,6 +128,7 @@ class TutorEngine:
             is_interrupt_style(utterance),
             decision.evaluation,
             decision.hint_level,
+            decision.faq_id,
         )
         return decision
 

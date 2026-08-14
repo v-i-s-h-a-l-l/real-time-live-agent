@@ -64,13 +64,17 @@ def test_student_answer_evaluates():
     assert state.last_student_answer == "I got 5"
 
 
-def test_help_request_is_tutoring_not_support():
+def test_help_request_is_grounded_faq_not_support():
     engine = TutorEngine()
     state = TutorState(phase="learning", topic_title="Euclid's Division Lemma")
     d = engine.decide("How can you help me?", state)
-    assert d.mode == TeachingMode.LEARN
-    assert "explain the current lesson" in d.strategy.lower()
+    assert d.intent == StudentIntent.FAQ
+    assert d.faq_id == "what_can_you_help"
+    assert d.faq_answer is not None
+    assert "hint" in d.faq_answer.lower()
+    assert "practice" in d.faq_answer.lower()
     assert "customer support" in d.strategy.lower()  # as a prohibition
+    assert "bank" not in d.faq_answer.lower()
 
 
 def test_unrelated_redirects():

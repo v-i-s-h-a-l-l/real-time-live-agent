@@ -431,6 +431,38 @@ def test_dashes_in_ordinary_sentences_are_not_minus():
     assert speak_for_tts(prose) == prose
 
 
+def test_number_unit_hyphen_is_not_minus():
+    assert speak_for_tts("20-minute focused session") == (
+        "twenty-minute focused session"
+    )
+    assert speak_for_tts("5-minute break") == "five-minute break"
+    assert speak_for_tts("10-minute session") == "ten-minute session"
+    assert speak_for_tts("2-minute break") == "two-minute break"
+    for spoken in (
+        speak_for_tts("20-minute focused session"),
+        speak_for_tts("5-minute break"),
+        speak_for_tts("a 15-minute pause"),
+    ):
+        assert "minus" not in spoken
+        assert "negative" not in spoken
+
+
+def test_mathematical_minus_and_negative_still_speak():
+    assert speak_for_tts("5 - 2") == "five minus two"
+    assert speak_for_tts("-5") == "negative five"
+    assert "minus" in speak_for_tts("b² - 4ac")
+    assert "minus" in speak_for_tts("3x² + 5x − 2")
+    assert "minus" in speak_for_tts("a-b")
+    assert speak_for_tts("x - y") == "ex minus why"
+    assert "minus" not in speak_for_tts("40-50 rupees")
+
+
+def test_en_dash_number_unit_is_not_minus():
+    spoken = speak_for_tts("Take a 20\u2013minute focused session.")
+    assert spoken == "Take a twenty-minute focused session."
+    assert "minus" not in spoken
+
+
 def test_subscripted_variables_multiply_audibly():
     spoken = speak_for_tts("$x_1 x_2 = 12$")
     assert "ex one times ex two equals twelve" in spoken

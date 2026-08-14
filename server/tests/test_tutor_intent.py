@@ -13,7 +13,16 @@ from tutor.types import StudentIntent  # noqa: E402
 
 
 def test_how_can_you_help():
+    from tutor.engine import TutorEngine
+    from tutor.types import TutorState
+
+    # Intent heuristics still see a help-shaped explanation cue; the engine
+    # overlays the product FAQ so the LLM cannot invent extra capabilities.
     assert detect_intent("How can you help me?") == StudentIntent.EXPLANATION
+    engine = TutorEngine()
+    decision = engine.decide("How can you help me?", TutorState(phase="learning"))
+    assert decision.intent == StudentIntent.FAQ
+    assert decision.faq_id == "what_can_you_help"
 
 
 def test_explanation_request():

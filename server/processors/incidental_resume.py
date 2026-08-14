@@ -144,8 +144,9 @@ _SOUND_MARKERS = re.compile(
     r"\*(cough|sneeze|ahem|throat|sniff|sigh)s?\*",
     re.I,
 )
-_NON_WORD = re.compile(r"[^A-Za-z0-9']+")
-_WORD = re.compile(r"[A-Za-z0-9']+")
+# Latin, digits, and Indic letters. ASCII-only matching treated Tamil/Hindi
+# speech as a cough and auto-resumed the previous explanation.
+_WORD = re.compile(r"[0-9]+|[A-Za-z']+|[^\W\d_]+", re.UNICODE)
 
 
 def is_incidental_utterance(text: str | None) -> bool:
@@ -162,6 +163,9 @@ def is_incidental_utterance(text: str | None) -> bool:
     if not words:
         return True
     if any(w in _MEANINGFUL_SHORT for w in words):
+        return False
+    # Any non-Latin letters (Tamil, Hindi, Telugu, …) are real speech.
+    if any(any(ord(ch) > 127 for ch in w) for w in words):
         return False
     if all(w in _FILLERS for w in words):
         return True

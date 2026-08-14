@@ -50,6 +50,10 @@ def test_study_break_events_are_the_published_wire_strings():
     }
 
 
+def test_safety_alert_is_the_published_wire_string():
+    assert protocol.SERVER_SAFETY_ALERT == "safety_alert"
+
+
 def test_message_type_reads_the_type_field():
     assert protocol.message_type({"type": "interrupt"}) == "interrupt"
 

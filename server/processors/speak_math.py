@@ -1140,6 +1140,25 @@ _LEFTOVER_MINUS = re.compile(
 )
 
 
+# Number + hyphen + English word: "20-minute", "5-year". Never a minus sign.
+# Single-letter tails ("x-y", "a-b") stay algebraic and are spoken as minus.
+_ENGLISH_COMPOUND_HYPHEN = re.compile(
+    r"(?<![A-Za-z0-9.])(\d{1,4})-([A-Za-z]{3,})\b"
+)
+
+
+def _speak_english_compound_hyphens(text: str) -> str:
+    """Say 20-minute as twenty-minute so TTS cannot read the hyphen as minus."""
+
+    def _repl(match: re.Match) -> str:
+        n = int(match.group(1))
+        if abs(n) > 9999:
+            return match.group(0)
+        return f"{_speak_integer(n)}-{match.group(2)}"
+
+    return _ENGLISH_COMPOUND_HYPHEN.sub(_repl, text)
+
+
 def _speak_leftover_operators(text: str) -> str:
     """Say stray + and - signs that survived in prose.
 
@@ -1173,6 +1192,20 @@ def _speak_remaining_powers(text: str) -> str:
 
 def _speak_bare_integers(text: str) -> str:
     """Say standalone 12 as twelve. Leave 3x / 2a glued to letters."""
+
+    def _unary(match: re.Match) -> str:
+        n = int(match.group(1))
+        if n > 9999:
+            return match.group(0)
+        return "negative " + _speak_integer(n)
+
+    # "-5" is a signed number. "40-50" and "twenty-minute" keep their hyphen:
+    # the minus here must not be preceded by a letter or digit.
+    text = re.sub(
+        r"(?<![A-Za-z0-9])-(\d{1,4})(?!\.\d)(?![A-Za-z0-9])",
+        _unary,
+        text,
+    )
 
     def _repl(match: re.Match) -> str:
         n = int(match.group(0))
@@ -1255,6 +1288,8 @@ def ensure_math_y_speech(text: str) -> str:
 
 def _speak_for_tts(text: str) -> str:
     text = normalize_math_signs(text)
+    # Before polynomial detection: "20-minute" is English, not 20 minus mi.
+    text = _speak_english_compound_hyphens(text)
     text = _replace_delimited(text)
     # Bare \\frac{...}{...} (often with nested \\sqrt) must be spoken before
     # _BARE_EQUATION, which stops at '{' and leaves "\frac" for TTS.
@@ -1304,6 +1339,11 @@ def _speak_for_tts(text: str) -> str:
         raw = match.group(1)
         # "40-50 rupees" is a range, not a polynomial.
         if not re.search(r"[A-Za-zαβγπθΔδ²³⁴⁵⁶⁷⁸⁹ⁿ]", raw):
+            return match.group(0)
+        # "20-minute": _ALG_TERM only eats "mi", leaving "nute". Do not
+        # speak that fragment as 20 minus m i.
+        rest = match.string[match.end() : match.end() + 1]
+        if rest.isalpha() and re.search(r"\d-[A-Za-z]{1,2}$", raw):
             return match.group(0)
         return speak_math_expr(raw, inline=True)
 

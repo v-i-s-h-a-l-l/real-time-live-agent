@@ -7,7 +7,9 @@ import {
 } from "@/lib/voice/voices";
 import type { ConversationMessage } from "@/lib/voice/conversation";
 import type { StudyBreakView } from "@/lib/voice/studyBreak";
+import type { SafetyAlertView } from "@/lib/voice/safetyAlert";
 import { BreakTimer } from "@/components/lesson/BreakTimer";
+import { SafetyConcernBanner } from "@/components/lesson/SafetyConcernBanner";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { StatusDot, type TutorLiveState } from "@/components/ui/StatusDot";
 import { studentFacingError } from "@/lib/ui/studentFacingError";
@@ -43,6 +45,7 @@ export function LessonVoiceDock({
   onEnd,
   onClearError,
   studyBreak,
+  safetyAlert,
 }: {
   lessonTitle: string;
   connectionState: VoiceConnectionState;
@@ -60,6 +63,7 @@ export function LessonVoiceDock({
   onEnd: () => void;
   onClearError: () => void;
   studyBreak: StudyBreakView;
+  safetyAlert: SafetyAlertView;
 }) {
   const connected = connectionState === "connected";
   const state = liveState(isActive, connectionState, turnState);
@@ -121,6 +125,7 @@ export function LessonVoiceDock({
         </div>
       ) : null}
 
+      <SafetyConcernBanner safetyAlert={safetyAlert} />
       <BreakTimer studyBreak={studyBreak} />
 
       <ConversationPanel
@@ -139,6 +144,7 @@ export function LessonVoiceDock({
         onVoiceResponsesChange={onVoiceResponsesChange}
         onSend={onSendText}
         studyBreak={studyBreak}
+        safetyAlert={safetyAlert}
       />
     </aside>
   );

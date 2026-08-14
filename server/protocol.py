@@ -12,8 +12,8 @@ The values below are the wire format and are mirrored by the browser in
 breaking protocol change: update both sides together.
 
 Most server-to-browser events are produced by Pipecat's RTVI processor.
-Study-break events are application messages on the same WebSocket
-(``OutputTransportMessageFrame``), not a second connection.
+Study-break and safety-alert events are application messages on the same
+WebSocket (``OutputTransportMessageFrame``), not a second connection.
 """
 
 from __future__ import annotations
@@ -73,6 +73,9 @@ SERVER_BREAK_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         SERVER_BREAK_MESSAGE,
     }
 )
+
+#: Internal + UI safety alert (self-harm / harm-to-others). Not an RTVI event.
+SERVER_SAFETY_ALERT: Final = "safety_alert"
 
 #: Adaptive practice state mirror (evaluation, hints, mastery) for the lesson UI.
 SERVER_PRACTICE_PROGRESS: Final = "practice_progress"

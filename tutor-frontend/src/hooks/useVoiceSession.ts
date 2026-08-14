@@ -22,6 +22,11 @@ import {
   IDLE_STUDY_BREAK,
   type StudyBreakView,
 } from "@/lib/voice/studyBreak";
+import {
+  applySafetyAlertEvent,
+  IDLE_SAFETY_ALERT,
+  type SafetyAlertView,
+} from "@/lib/voice/safetyAlert";
 import type {
   JsonObject,
   MicState,
@@ -39,6 +44,7 @@ export interface VoiceSessionState {
   isActive: boolean;
   voiceResponsesEnabled: boolean;
   studyBreak: StudyBreakView;
+  safetyAlert: SafetyAlertView;
   practiceProgress: PracticeProgress;
 }
 
@@ -82,6 +88,8 @@ export function useVoiceSession(): UseVoiceSessionResult {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [voiceResponsesEnabled, setVoiceResponsesEnabledState] = useState(true);
   const [studyBreak, setStudyBreak] = useState<StudyBreakView>(IDLE_STUDY_BREAK);
+  const [safetyAlert, setSafetyAlert] =
+    useState<SafetyAlertView>(IDLE_SAFETY_ALERT);
   const [practiceProgress, setPracticeProgress] = useState<PracticeProgress>(
     IDLE_PRACTICE_PROGRESS,
   );
@@ -113,6 +121,7 @@ export function useVoiceSession(): UseVoiceSessionResult {
             (state === "idle" || state === "error" || state === "disconnecting")
           ) {
             setStudyBreak(IDLE_STUDY_BREAK);
+            setSafetyAlert(IDLE_SAFETY_ALERT);
             setPracticeProgress(IDLE_PRACTICE_PROGRESS);
           }
         },
@@ -143,6 +152,18 @@ export function useVoiceSession(): UseVoiceSessionResult {
         onBreakEvent: (event) => {
           if (!live) return;
           setStudyBreak((prev) => applyStudyBreakEvent(prev, event));
+          const spoken = event.spoken?.trim();
+          if (spoken) {
+            reduceIfLive({
+              type: "assistant-complete",
+              id: makeId(),
+              content: spoken,
+            });
+          }
+        },
+        onSafetyAlert: (event) => {
+          if (!live) return;
+          setSafetyAlert((prev) => applySafetyAlertEvent(prev, event));
           const spoken = event.spoken?.trim();
           if (spoken) {
             reduceIfLive({
@@ -183,6 +204,7 @@ export function useVoiceSession(): UseVoiceSessionResult {
       setErrorMessage(null);
       setTranscriptState(emptyTranscript());
       setStudyBreak(IDLE_STUDY_BREAK);
+      setSafetyAlert(IDLE_SAFETY_ALERT);
       setPracticeProgress(IDLE_PRACTICE_PROGRESS);
       const client = clientRef.current;
       if (!client) return;
@@ -202,6 +224,7 @@ export function useVoiceSession(): UseVoiceSessionResult {
     setMicState("off");
     setConnectionState("idle");
     setStudyBreak(IDLE_STUDY_BREAK);
+    setSafetyAlert(IDLE_SAFETY_ALERT);
     setPracticeProgress(IDLE_PRACTICE_PROGRESS);
   }, []);
 
@@ -261,6 +284,7 @@ export function useVoiceSession(): UseVoiceSessionResult {
     isActive,
     voiceResponsesEnabled,
     studyBreak,
+    safetyAlert,
     practiceProgress,
     startSession,
     endSession,

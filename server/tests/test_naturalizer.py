@@ -119,3 +119,14 @@ def test_bracket_display_math_is_spoken_not_read_as_latex():
 def test_does_not_strip_natural_ack():
     assert _clean("Yeah.") == "Yeah."
     assert _clean("Exactly. That's the idea.") == "Exactly. That's the idea."
+
+
+def test_number_minute_hyphen_is_not_minus_on_tts_path():
+    spoken = _clean("Take a 20-minute focused session, then a 5-minute break.")
+    assert spoken == (
+        "Take a twenty-minute focused session, then a five-minute break."
+    )
+    assert "minus" not in spoken
+    math = _clean("Then compute 5 - 2 and -5.")
+    assert "minus" in math
+    assert "negative five" in math

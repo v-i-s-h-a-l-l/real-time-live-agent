@@ -71,6 +71,16 @@ def test_english_words_are_not_incidental():
     assert not is_incidental_utterance("Yes, exactly.")
 
 
+def test_tamil_and_hindi_speech_is_not_incidental():
+    assert not is_incidental_utterance("ஒரு எக்ஸாம்பிளோட எக்ஸ்பிளைன் பண்றியா?")
+    assert not is_incidental_utterance("எக்ஸாம்பிள் கொடுக்கிறியா?")
+    assert not is_incidental_utterance(
+        "இல்லை, இப்படி வெறுமனே எக்ஸ்பிளைன் பண்ணாத, ஒரு எக்ஸாம்பிளோடு எக்ஸ்பிளைன் பண்ணு எனக்கு."
+    )
+    assert not is_incidental_utterance("उदाहरण के साथ समझाइए")
+    assert not is_incidental_utterance("एक example दो")
+
+
 def test_remainder_does_not_restart_the_explanation():
     text = (
         "First, we multiply the first equation by two. "

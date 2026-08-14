@@ -38,6 +38,7 @@ export function LessonExperience({
     voiceResponsesEnabled,
     setVoiceResponsesEnabled,
     studyBreak,
+    safetyAlert,
     practiceProgress,
   } = useVoiceSession();
 
@@ -169,6 +170,7 @@ export function LessonExperience({
           onEnd={endSession}
           onClearError={clearError}
           studyBreak={studyBreak}
+          safetyAlert={safetyAlert}
         />
       </div>
     </div>
