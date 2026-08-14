@@ -1,436 +1,987 @@
 # Lumina
 
-Class 10 Mathematics AI tutor with a live voice session. The student studies a lesson in the browser and talks to the tutor over a WebSocket.
+**Class 10 Mathematics voice tutor** — study structured lesson content in the browser, then talk to an AI tutor that understands what you are looking at, explains concepts, answers doubts, and guides practice.
 
-**Product UI:** `tutor-frontend/` (Next.js → **Vercel**)  
-**Voice engine:** `server/` (FastAPI + Pipecat → **Render**)
+Built as a **real-time voice conversation engine** (not a chatbot with TTS bolted on): streaming duplex audio, true barge-in, context-aware tutoring, and mathematical speech that sounds like a teacher.
 
-**Production deploy:** [docs/deployment.md](docs/deployment.md) — Vercel frontend, Render backend, env vars, WebSocket, CORS, deployment order.
+| Layer | Path | Deploy target |
+|-------|------|---------------|
+| **Frontend** | [`tutor-frontend/`](tutor-frontend/) | [Vercel](https://vercel.com) |
+| **Backend** | [`server/`](server/) | [Render](https://render.com) |
 
-Engineer overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
-The engine can still stream a conversation like a phone call (barge-in, Smart Turn, spoken replies). The tutor layer on top of it keeps the session inside Class 10 maths.
-
-<p align="center">
-  <a href="voice_agent_working.mp4">
-    <img src="https://img.shields.io/badge/▶-Watch_demo-111827?style=for-the-badge" alt="Watch demo"/>
-  </a>
-  &nbsp;
-  <img src="https://img.shields.io/badge/Pipecat-1.5-4F46E5?style=for-the-badge" alt="Pipecat"/>
-  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/WebSocket-streaming-0EA5E9?style=for-the-badge" alt="WebSocket"/>
-</p>
-
-<p align="center">
-  <sub>
-    <strong>Speak naturally · Interrupt mid-sentence · Hear replies stream in real time</strong><br/>
-    Sarvam STT · Cerebras / Groq LLM · Cartesia Sonic TTS · Silero VAD · Smart Turn
-  </sub>
-</p>
-
-<p align="center">
-  <video src="voice_agent_working.mp4" controls width="720" style="max-width:100%; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.25);">
-    <a href="voice_agent_working.mp4"><strong>▶ Watch the working demo</strong></a>
-  </video>
-</p>
+**Deep dives:** [Architecture](docs/ARCHITECTURE.md) · [Production deployment](docs/deployment.md) · [Long-session QA checklist](docs/LONG_SESSION_TEST_CHECKLIST.md)
 
 ---
 
-## Why Ministros exists
+## Table of contents
 
-Most “voice bots” are text chatbots with TTS bolted on. They wait for you to finish, batch a full reply, then read a paragraph. The result feels robotic: long pauses, no interruptions, markdown-y answers spoken aloud.
-
-**Ministros is built as a streaming conversation engine.**
-
-- Microphone audio flows continuously over a WebSocket
-- A multi-stage Pipecat pipeline turns speech → intent → spoken reply in near real time
-- You can **barge in** while the bot is talking; playback stops immediately
-- Replies are written for **ears**, not screens — short, natural, no bullet lists
-
-That is the difference between a demo widget and something you would actually talk to.
+1. [Product overview](#1-product-overview)
+2. [Key features](#2-key-features)
+3. [Product workflow](#3-product-workflow)
+4. [System architecture](#4-system-architecture)
+5. [Voice pipeline](#5-voice-pipeline)
+6. [Interruption / barge-in](#6-interruption--barge-in)
+7. [Context-aware tutoring](#7-context-aware-tutoring)
+8. [Mathematical speech system](#8-mathematical-speech-system)
+9. [Multilingual architecture](#9-multilingual-architecture)
+10. [AI / LLM architecture](#10-ai--llm-architecture)
+11. [Content architecture](#11-content-architecture)
+12. [Frontend architecture](#12-frontend-architecture)
+13. [Backend architecture](#13-backend-architecture)
+14. [Security](#14-security)
+15. [Observability & reliability](#15-observability--reliability)
+16. [Performance](#16-performance)
+17. [Deployment architecture](#17-deployment-architecture)
+18. [Environment variables](#18-environment-variables)
+19. [Local development](#19-local-development)
+20. [Production deployment](#20-production-deployment)
+21. [Testing / QA](#21-testing--qa)
+22. [Error & failure behavior](#22-error--failure-behavior)
+23. [Project structure](#23-project-structure)
+24. [API & WebSocket reference](#24-api--websocket-reference)
+25. [Design principles](#25-design-principles)
+26. [Roadmap](#26-roadmap)
+27. [FAQ](#27-faq)
+28. [Troubleshooting](#28-troubleshooting)
+29. [Technology stack](#29-technology-stack)
+30. [License & credits](#30-license--credits)
 
 ---
 
-## Features
+## 1. Product overview
 
-| Capability | What you get |
-|---|---|
-| **Streaming duplex voice** | Raw PCM16 @ 16 kHz over WebSocket — mic up, speaker down, same session |
-| **True barge-in** | Server VAD + client AudioWorklet; bot audio flushes the moment you speak over it |
-| **Smart turn-taking** | Silero VAD starts turns; LocalSmartTurnAnalyzerV3 decides when you’ve finished |
-| **Echo-aware audio gate** | Drops speaker echo while Ministros talks; still lets loud intentional interrupts through |
-| **Voice-first LLM style** | System prompt + naturalizer strip markdown, disclaimers, and robotic openers |
-| **LLM failover** | Cerebras primary → automatic Groq retry on rate limits / errors (`gpt-oss-120b`) |
-| **Empty / timeout guards** | If the model returns nothing useful, a natural spoken fallback is injected |
-| **Deduped turns** | Transcription + LLM-inference dedup prevent double replies from racing turn detectors |
-| **Wake-word awareness** | “Hey Ministros” / name-only greetings handled as presence, not a full re-intro |
-| **Call-mute phrases** | “One sec, got a call” pauses the pipeline; “I’m back” resumes |
-| **Repeat detection** | “Say that again” reuses context instead of inventing a new answer |
-| **Topic pivot detection** | Soft awareness when the user changes subject mid-conversation |
-| **Context hygiene** | Truncated barge-in replies cleaned; history trimmed for stable latency |
-| **Deploy-ready split** | Static UI on Vercel · FastAPI + pipeline on Render (or run both locally) |
+### What is Lumina?
 
----
+Lumina is a **context-aware AI tutor** for Indian Class 10 students. It combines NCERT-aligned Mathematics content with a **live voice session** — students read lesson material slide-by-slide and speak naturally to a tutor that knows the current page, topic, and practice question.
 
-## Architecture
+### Problem it solves
 
-### System overview
+Traditional LMS tools show static content. Generic chatbots lack lesson context, handle voice poorly, and cannot be interrupted mid-sentence. Lumina targets the gap: **structured learning + natural spoken tutoring** on the same screen.
 
-```mermaid
-flowchart LR
-  subgraph Browser["Browser (Vercel or localhost)"]
-    UI["Ministros UI<br/>index.html"]
-    Mic["Mic → AudioWorklet<br/>PCM16 @ 16 kHz"]
-    Spk["Speaker queue<br/>PCM playback"]
-    UI --> Mic
-    Spk --> UI
-  end
+### Who it is for
 
-  subgraph Backend["FastAPI backend (Render or localhost)"]
-    WS["WebSocket /ws"]
-    Pipe["Pipecat pipeline"]
-    WS --> Pipe
-  end
+- **Students:** Class 10, Mathematics (English UI; multilingual voice)
+- **Developers / reviewers:** Full-stack voice-AI system with documented pipeline
 
-  subgraph Providers["Cloud AI providers"]
-    STT["Sarvam saaras:v3"]
-    LLM["Cerebras → Groq<br/>gpt-oss-120b"]
-    TTS["Cartesia Sonic 3.5"]
-  end
+### Core experience
 
-  Mic -->|"binary PCM + RTVI JSON"| WS
-  Pipe --> STT
-  Pipe --> LLM
-  Pipe --> TTS
-  Pipe -->|"PCM + events"| Spk
+```
+Student opens lesson
+  → reads sequential content (concepts, formulas, examples)
+  → current slide becomes tutor context
+  → speaks or types a question
+  → tutor responds in streaming voice + transcript
+  → student can interrupt at any time
+  → practice questions with hints (answers never shipped to browser)
+  → continues learning
 ```
 
-### End-to-end voice path
+### What makes it different
+
+| Typical chatbot / LMS | Lumina |
+|----------------------|--------|
+| Request/response text | Streaming duplex WebSocket audio |
+| No page awareness | Session + learning context injected per slide |
+| Cannot interrupt | Client + server barge-in with turn reset |
+| Reads markdown aloud | Naturalizer + math-to-speech layer for TTS |
+| Single LLM call | Failover chain, dedup, empty-response guard |
+
+---
+
+## 2. Key features
+
+Only capabilities **implemented in this repository** are listed.
+
+### AI tutor
+
+- Real-time voice tutoring over WebSocket
+- Contextual tutoring tied to current lesson slide / practice question
+- Concept explanations, step-by-step problem solving, doubt clarification
+- Hints and practice evaluation (server-side answer secrets)
+- Natural follow-up conversation within Class 10 Maths scope
+- Off-topic / pivot detection (`PivotDetectorProcessor`)
+- FAQ handling (platform questions, e.g. “who made you?”)
+- Study break timer (“take a break” / resume)
+- Typed chat on the same LLM path as voice
+
+### Real-time voice
+
+- PCM16 mono @ 16 kHz streaming (browser ↔ server)
+- WebSocket transport with JSON control + binary audio
+- Low-latency interaction (streaming STT, LLM, TTS — no batch-and-play)
+- **Barge-in / interruption** (client AudioWorklet + server Silero VAD)
+- **Silero VAD** for turn start
+- **Smart Turn** (`LocalSmartTurnAnalyzerV3`) for turn end
+- **AudioGate** — echo rejection while tutor speaks; loud speech still passes
+- **Optional RNNoise** — server-side denoising (`RNNOISE_ENABLED=false` by default)
+- Voice connection status banner (lost / reconnecting / connected)
+- Auto-reconnect with exponential backoff (client, max 8 attempts)
+
+### Multilingual (voice)
+
+- **Supported session languages:** English (`en-IN`), Hindi (`hi-IN`), Tamil (`ta-IN`), Telugu (`te-IN`)
+- Sarvam STT `language=unknown` + `LanguageTrackerProcessor` for detection
+- Language persistence with hysteresis (`LANGUAGE_CONFIRMATIONS`)
+- Explicit language switch requests honored immediately
+- Regional conversational style in tutor prompts
+- English technical terms / code-switching supported in prompts
+- **UI language:** English only (no i18n framework)
+- Default WebSocket param: `lang=auto`
+
+### Mathematics
+
+- KaTeX rendering in transcript UI (display layer)
+- Deterministic **math-to-speech** (`speak_math.py`) — no extra LLM for pronunciation
+- Fractions, powers, roots, variables, equations → teacher-style spoken English
+- Separate **display representation** vs **TTS representation**
+
+### Learning experience
+
+- Slide/page-aware context (`session_context`, `learning_context`)
+- Sequential lesson units: overview → concepts → formulas → examples → mistakes
+- Practice phase with adaptive difficulty
+- Live transcript + typed chat in conversation panel
+- Break timer UI
+- Five Cartesia voice personas (regional preference labels)
+
+### Safety
+
+- Regex-based safety turn interceptor (no extra LLM on normal turns)
+- Self-harm / distress phrasing detection
+- Supportive spoken response + `SafetyConcernBanner` in UI
+- Session can resume after safety handling
+
+### Reliability
+
+- LLM failover: Cerebras → optional second Cerebras key → Groq
+- Sarvam STT reconnect wrapper (WebSocket drop recovery)
+- Transcription dedup + LLM inference dedup
+- Empty LLM response guard (8 s timeout + spoken fallback)
+- Fail-safe RNNoise passthrough if library unavailable
+- Structured ops logging (`ops_log.py`)
+
+---
+
+## 3. Product workflow
 
 ```mermaid
-sequenceDiagram
-  participant U as User
-  participant C as Browser client
-  participant S as FastAPI / Pipecat
-  participant P as STT · LLM · TTS
-
-  U->>C: Speaks into mic
-  C->>S: Stream PCM frames (WebSocket)
-  S->>S: Gate · VAD · Smart Turn
-  S->>P: STT (Sarvam)
-  P-->>S: Transcription
-  S->>P: LLM stream (Cerebras / Groq)
-  P-->>S: Tokens
-  S->>S: Naturalize · empty-guard
-  S->>P: TTS (Cartesia)
-  P-->>S: Audio chunks (~40 ms TTFB)
-  S-->>C: Stream PCM + RTVI events
-  C-->>U: Hear reply (can barge in anytime)
+flowchart TD
+  A[Sign in / Sign up] --> B[Dashboard]
+  B --> C[Select Class 10 Mathematics]
+  C --> D[Select chapter]
+  D --> E[Select topic]
+  E --> F[Lesson page loads]
+  F --> G[Learning phase: sequential units]
+  G --> H{Student action}
+  H -->|Voice| I[Talk to tutor]
+  H -->|Type| J[Typed chat]
+  H -->|Navigate| K[Next / previous slide]
+  I --> L[Context synced to engine]
+  J --> L
+  K --> L
+  L --> M[STT → LLM → TTS stream]
+  M --> N[Transcript + KaTeX render]
+  N --> H
+  G --> O[Practice phase]
+  O --> P[Submit / hint / solution]
+  P --> M
+  O --> Q[Completed → restart or exit]
 ```
 
-### Pipeline stages (server)
+**Step-by-step (actual implementation):**
 
-Audio and frames move left → right through a single Pipecat `Pipeline`:
+1. Student signs in (`/signin`) — JWT cookies set via Next.js BFF → Render `/auth/*`
+2. Dashboard (`/`) shows Class 10 Mathematics (English is “coming soon” placeholder)
+3. Student picks chapter → topic
+4. Lesson page loads topic content from `CurriculumService` (public bundle — no answers)
+5. **Learning phase:** auto-built units from curriculum (overview, notes, formula board, example, mistakes)
+6. On slide change, `useLearningContextSync` sends `learning_context` over WebSocket
+7. Student taps **Talk to tutor** → voice ticket minted → WebSocket auth handshake → pipeline starts
+8. Student speaks or types; tutor streams reply
+9. Student can **interrupt** mid-reply; truncated assistant text dropped from context
+10. **Practice phase:** one question at a time; hints/solutions fetched from signed API routes
+11. Voice answers in practice route through same text path as typed submit
+
+---
+
+## 4. System architecture
 
 ```mermaid
 flowchart TB
-  IN["transport.input()"] --> INT["ClientInterrupt"]
-  INT --> GATE["AudioGate<br/>echo vs barge-in"]
-  GATE --> VAD["Silero VAD"]
-  VAD --> RESET["TurnReset"]
-  RESET --> SIL["SilenceDetector"]
-  SIL --> STT["Sarvam STT"]
-  STT --> TD["TranscriptionDedup"]
-  TD --> MUTE["CallMute"]
-  MUTE --> REP["RepeatDetector"]
-  REP --> AGG["User aggregator<br/>+ Smart Turn"]
-  AGG --> SAN["ContextSanitizer"]
-  SAN --> LD["LLMInferenceDedup"]
-  LD --> PIV["PivotDetector"]
-  PIV --> LLM["FailoverLLM<br/>Cerebras → Groq"]
-  LLM --> NAT["Naturalizer"]
-  NAT --> EMP["LLMEmptyGuard"]
-  EMP --> TTS["Cartesia TTS"]
-  TTS --> RTVI["RTVI"]
-  RTVI --> AAGG["Assistant aggregator"]
-  AAGG --> OUT["transport.output()"]
+  subgraph Browser["Student browser"]
+    UI[Next.js UI]
+    WSClient[VoiceAgentClient]
+    Mic[Mic + AudioWorklet]
+    Spk[Speaker queue]
+  end
+
+  subgraph Vercel["Vercel"]
+    Next[Next.js App Router]
+    API["/api/* BFF routes"]
+  end
+
+  subgraph Render["Render"]
+    FastAPI[FastAPI]
+    Pipe[Pipecat pipeline]
+  end
+
+  subgraph External["External APIs"]
+    Sarvam[Sarvam STT]
+    Cerebras[Cerebras LLM]
+    Groq[Groq LLM]
+    Cartesia[Cartesia TTS]
+  end
+
+  UI --> Next
+  API -->|HTTPS REST| FastAPI
+  WSClient -->|WSS direct| FastAPI
+  Mic --> WSClient
+  FastAPI --> Pipe
+  Pipe --> Sarvam
+  Pipe --> Cerebras
+  Pipe --> Groq
+  Pipe --> Cartesia
+  Pipe -->|PCM out| Spk
 ```
 
-### Repository layout
+| Layer | Responsibility |
+|-------|----------------|
+| **Next.js (Vercel)** | Auth UI, curriculum navigation, lesson UX, BFF proxy to Render, voice ticket minting |
+| **VoiceAgentClient** | WebSocket, mic capture, playback, barge-in, reconnect — **not proxied through Vercel** |
+| **FastAPI** | HTTP auth, health/ready, WebSocket `/ws`, static debug UI (dev only) |
+| **Pipecat** | Frame-based real-time pipeline orchestration |
+| **Processors** | Tutor logic, safety, context, dedup, naturalization — see [§5](#5-voice-pipeline) |
+| **External APIs** | STT, LLM, TTS — keys server-side only |
 
-```text
-real-time-live-agent/
-├── client/                 # Browser UI (deploy to Vercel)
-│   ├── index.html          # Ministros shell
-│   ├── agent.js            # WebSocket ↔ mic/speaker
-│   ├── audio-processor.js  # AudioWorklet capture + local VAD
-│   ├── config.js           # Resolves WS URL
-│   └── vercel.json
-├── server/                 # FastAPI + Pipecat (deploy to Render)
-│   ├── main.py             # /health, /ready, /ws, static (local)
-│   ├── pipeline.py         # Full voice pipeline assembly
-│   ├── config.py           # Env / keys
-│   ├── processors/         # Custom conversation processors
-│   ├── services/           # Failover LLM
-│   └── serializers/        # Raw PCM + RTVI
-├── voice-agent/            # Python project + venv (local)
-├── requirements.txt        # Render install list
-├── render.yaml             # Optional Render Blueprint
-└── voice_agent_working.mp4 # Demo
+---
+
+## 5. Voice pipeline
+
+**Sample rate:** 16 kHz mono PCM16 end-to-end.  
+**Wire format:** binary PCM up/down; JSON control messages with `"type"`.
+
+### Upstream (mic → STT)
+
+| Order | Component | Why it exists |
+|-------|-----------|---------------|
+| 1 | `transport.input()` | Deserialize WebSocket PCM (512-sample / 32 ms chunks) |
+| 2 | `ClientInterruptProcessor` | Browser `{type:"interrupt"}` → pipeline cancellation |
+| 3 | `TtsVoiceProcessor` | Voice selection control messages |
+| 4 | `SessionContextProcessor` | Session / learning / tutor context from browser |
+| 5 | **AudioGate** | Drop quiet echo while bot speaks; pass loud barge-in (RMS ≥ 0.04) |
+| 6 | **RNNoise** *(optional)* | Server denoising 16↔48 kHz; **off by default** |
+| 7 | **Silero VAD** | Speech start/stop; drives turn boundaries |
+| 8 | `TurnResetProcessor` | Remove truncated assistant text after interruption |
+| 9 | `SilenceDetectorProcessor` | Long-silence prompts |
+| 10 | **Sarvam STT** | Streaming transcription (`saaras:v3`, `language=unknown`) |
+| 11 | `TranscriptionDedupProcessor` | Prevent duplicate transcripts |
+| 12 | `LanguageTrackerProcessor` | Map STT language → session language + TTS voice hints |
+| 13 | `CallMuteProcessor` | Pause during study break |
+| 14 | `RepeatDetectorProcessor` | “Say that again” handling |
+| 15 | `IncidentalResumeGateProcessor` | Cough/noise vs real speech |
+| 16 | `user_aggregator` | Smart Turn stop + context aggregation |
+
+### Downstream (text → speaker)
+
+| Order | Component | Why it exists |
+|-------|-----------|---------------|
+| 17 | `TextInputProcessor` | Typed chat → same path as voice |
+| 18 | `SafetyProcessor` | Crisis phrases → supportive response (regex, not extra LLM) |
+| 19 | `StudyBreakProcessor` | Break/resume logic |
+| 20 | `TutorTurnProcessor` | Tutor engine directives + scope |
+| 21 | `ContextSanitizerProcessor` | Context hygiene |
+| 22 | `LLMInferenceDedupProcessor` | Prevent double LLM calls |
+| 23 | `PivotDetectorProcessor` | Topic pivot awareness |
+| 24 | **FailoverLLMService** | Cerebras → Groq chain |
+| 25 | `ResponseNaturalizerProcessor` | Spoken-style text; invokes math speech |
+| 26 | `LLMEmptyGuardProcessor` | Timeout + fallback line if model empty |
+| 27 | `TtsApplyVoiceProcessor` | Apply Cartesia voice ID |
+| 28 | **Cartesia TTS** | `sonic-3.5` @ 16 kHz |
+| 29 | `RTVIProcessor` | Events to browser (speaking, transcription, etc.) |
+| 30 | `transport.output()` | PCM to WebSocket |
+
+```mermaid
+flowchart LR
+  Mic[Browser mic] --> WS[WebSocket]
+  WS --> Gate[AudioGate]
+  Gate --> Denoise[RNNoise optional]
+  Denoise --> VAD[Silero VAD]
+  VAD --> STT[Sarvam STT]
+  STT --> Lang[Language tracker]
+  Lang --> LLM[Cerebras / Groq]
+  LLM --> Nat[Naturalizer + speak_math]
+  Nat --> TTS[Cartesia]
+  TTS --> WS
+  WS --> Spk[Browser speaker]
 ```
 
 ---
 
-## Latency & timing
+## 6. Interruption / barge-in
 
-Numbers below are **component targets and configured thresholds** from this codebase and provider characteristics — not a lab benchmark suite. Real end-to-end latency depends on network RTT, region, and model load.
+Interruption is a **first-class feature**, implemented on both client and server.
 
-### Latency budget (typical happy path)
+### Client path
 
-| Stage | Typical / configured | Notes |
-|---|---|---|
-| Capture frame | **~8 ms** | AudioWorklet: 128 samples @ 16 kHz |
-| Local barge-in debounce | **220 ms** | Suppresses noise blips before interrupt |
-| Min bot-speak before local barge-in | **400 ms** | Avoids killing the first syllable of a reply |
-| VAD speech start | **200 ms** | `start_secs=0.2` |
-| VAD speech stop | **500 ms** | `stop_secs=0.5` |
-| Smart Turn stop | model-driven | LocalSmartTurnAnalyzerV3 (not a fixed timer) |
-| User-turn stop timeout | **3.0 s** | Safety bound if turn analyzer is quiet |
-| STT (Sarvam saaras:v3) | streaming | Partial → final as you speak |
-| LLM first token (Cerebras) | usually sub-second | Failover to Groq on 429 / errors |
-| Empty-guard timeout | **8.0 s** | Spoken fallback if model stalls |
-| TTS first audio (Cartesia Sonic 3.5) | **~40 ms TTFB** | As used in pipeline comments / Sonic class |
-| Audio-gate decay after bot stops | **350 ms** | Soft handoff before ungating mic path |
+1. **AudioWorklet** (`public/audio-processor.js`) runs local VAD (RMS + spectral centroid 300–3400 Hz)
+2. When user speaks while bot audio plays → immediate **playback flush**
+3. Debounced `{type:"interrupt"}` JSON to server (220 ms debounce, 400 ms min bot speak time)
+4. On RTVI `userStartedSpeaking` from server → local flush without duplicate interrupt (800 ms dedup)
 
-### What “feels fast”
+### Server path
 
-For a short question, a good session usually feels like:
-
-1. You finish speaking → turn ends (Smart Turn / VAD)
-2. First spoken audio returns within roughly **~0.7–1.5 s** on a healthy network and warm providers  
-3. You can cut Ministros off mid-sentence; playback clears in **well under half a second** after a confident barge-in
-
-Cold starts (Render free tier sleep, first torch/model load) can add seconds — use a warm always-on instance for production.
+1. `ClientInterruptProcessor` broadcasts Pipecat interruption
+2. **Silero VAD** detects user speech during bot turn
+3. **AudioGate** passes frames with RMS ≥ 0.04 during bot speech
+4. `PipelineParams(allow_interruptions=True)` propagates cancellation
+5. **TurnResetProcessor** drops partial assistant message from LLM context
+6. **IncidentalResumeGateProcessor** filters cough/noise; **IncidentalResumeCaptureProcessor** can resume truncated TTS remainder when appropriate
 
 ---
 
-## Tech stack
+## 7. Context-aware tutoring
 
-| Layer | Choice |
-|---|---|
-| Orchestration | [Pipecat](https://github.com/pipecat-ai/pipecat) |
-| API / WS | FastAPI + Uvicorn |
-| STT | Sarvam `saaras:v3` |
-| LLM | Cerebras `gpt-oss-120b` with Groq failover |
-| TTS | Cartesia `sonic-3.5` |
-| VAD | Silero |
-| Turn analysis | LocalSmartTurnAnalyzerV3 |
-| Client | Vanilla JS, AudioWorklet, raw PCM16 |
-| Deploy | Vercel (static UI) · Render (Python WS backend) |
+The tutor is **not** a generic chatbot. Context arrives over the WebSocket as JSON control frames:
+
+| Message | Content | Visibility |
+|---------|---------|------------|
+| `session_context` | Class, subject, chapter, topic IDs and titles | Tutor + LLM |
+| `learning_context` | Current slide type, visible text, practice question stem | Tutor + LLM |
+| `tutor_context` | Hints, expected answer, solution (HMAC-signed) | Tutor only — never in student UI bundle |
+
+**Flow:**
+
+1. Topic page builds `TutorSessionContext` via `CurriculumService`
+2. `toPublicTopic()` strips secrets before sending to browser
+3. `useLearningContextSync` pushes updates on slide navigation
+4. `/api/tutor-context` returns signed tutor-only payload for hints/solutions
+5. `SessionContextProcessor` sanitizes and injects `[SESSION_CONTEXT]` / `[LEARNING_CONTEXT]` system notes
+6. `TutorTurnProcessor` applies tutor engine policy on top of context
 
 ---
 
-## How to use
+## 8. Mathematical speech system
 
-### As an end user
+Two representations are intentionally separated:
 
-1. Open the app (local `http://localhost:8805/` or your Vercel URL).
-2. Click **Connect** and allow the microphone.
-3. Wait for the orb / status to show listening.
-4. **Talk normally** — no push-to-talk.
-5. Interrupt anytime by speaking over the bot.
-6. Click **Disconnect** when finished.
+| Layer | Used for | Example |
+|-------|----------|---------|
+| **Display** | Transcript UI (KaTeX) | `$x^2$`, `\frac{a}{b}` |
+| **Speech** | Cartesia TTS input | “x squared”, “a divided by b” |
 
-Tips:
+**Implementation:** `server/processors/speak_math.py` — deterministic regex/transform pipeline called from `ResponseNaturalizerProcessor`. **No extra LLM call** for pronunciation.
 
-- Use headphones if you get echo on loud speakers.
-- Close Zoom/Teams if the mic is locked by another app.
-- On Vercel, the page must be **HTTPS**; the WebSocket must be **`wss://…/ws`**.
+Examples handled in tests:
 
-### As a developer (local)
+- `x²` → “x squared”
+- `√x` → “the square root of x”
+- `\frac{a}{b}` → “a divided by b”
+- Variables spelled letter-by-letter when needed (`_LETTER_NAMES` map)
 
-**1. Prerequisites**
+---
 
-- Python **3.12** (3.13 not supported by this project pin)
-- API keys: Cerebras, Sarvam, Cartesia, optional Groq
+## 9. Multilingual architecture
 
-**2. Environment**
+### Supported languages (voice session)
+
+| Code | Language |
+|------|----------|
+| `en-IN` | English |
+| `hi-IN` | Hindi |
+| `ta-IN` | Tamil |
+| `te-IN` | Telugu |
+
+Defined in `server/languages.py` as `SUPPORTED_LANGUAGES`.
+
+### Pipeline behavior
+
+1. **Sarvam STT** transcribes with auto language detection
+2. **LanguageTrackerProcessor** updates session language with confidence + hysteresis
+3. Explicit student requests (“speak in Hindi”) switch immediately
+4. **Tutor prompts** include per-language style blocks
+5. **ResponseNaturalizer** picks Hindi/English conversational starters
+6. **Cartesia TTS** language updated mid-session via `Settings.language`
+
+### Voice selection (UI)
+
+Five Cartesia voices (Riya, Akshara, Shanti, Vishal, Dev) — labeled with regional preference; any voice can be used with any supported spoken language.
+
+---
+
+## 10. AI / LLM architecture
+
+| Setting | Value |
+|---------|-------|
+| **Primary** | Cerebras — `gpt-oss-120b` |
+| **Fallback 1** | Second Cerebras key (`CEREBRAS_API_KEY_2`) — same model, separate rate limit |
+| **Fallback 2** | Groq — `openai/gpt-oss-120b` |
+| **Temperature** | 0.6 |
+| **Max tokens** | 384 completion |
+| **Reasoning** | `low` |
+
+**Failover** (`FailoverLLMService`): primary exception → try fallbacks in order → re-raise last error so `LLMEmptyGuardProcessor` can speak a graceful line. Ops events: `cerebras_429`, `groq_failover`, `llm_request_failure`.
+
+**Prompt strategy:** Class 10 maths tutor system prompt + injected context markers + tutor turn directives. Not documented verbatim here (see `server/tutor/prompts.py`).
+
+**Dedup:** `TranscriptionDedupProcessor`, `LLMInferenceDedupProcessor` — prevent double answers from racing turn detectors.
+
+**Naturalization:** Strips markdown, bullet lists, disclaimers; applies math speech before TTS.
+
+---
+
+## 11. Content architecture
+
+```
+Class 10
+  └── Mathematics (available)
+        ├── Real Numbers (3 topics)
+        ├── Polynomials (3 topics)
+        ├── Pair of Linear Equations (4 topics)
+        └── Quadratic Equations (4 topics)
+              └── Topic
+                    ├── conceptNotes, keyPoints, formulas
+                    ├── worked examples, commonMistakes
+                    └── practiceQuestions[] (with difficulty, hints, expectedAnswer)
+```
+
+**Source:** `tutor-frontend/src/content/curriculum/class10/mathematics/`  
+**Access:** `CurriculumService` singleton — validated at startup via `validateContent.ts`
+
+**Security:** `toPublicTopic()` removes hints, expected answers, and solutions from client bundles. Practice secrets served only via authenticated `/api/practice/*` and signed `tutor_context`.
+
+---
+
+## 12. Frontend architecture
+
+**Stack:** Next.js 15 App Router, React 19, TypeScript, Tailwind CSS 4, KaTeX.
+
+| Area | Location |
+|------|----------|
+| Routes | `src/app/` — dashboard, auth, subject/chapter/topic hierarchy |
+| API BFF | `src/app/api/` — auth, voice session, practice, tutor-context |
+| Voice client | `src/lib/voice/VoiceAgentClient.ts` + `useVoiceSession` hook |
+| Voice config | `src/lib/voice.ts` — WebSocket URL centralization |
+| Backend proxy | `src/lib/api.ts` → `src/lib/server/backendApi.ts` |
+| Curriculum | `src/content/curriculum/`, `src/services/curriculum/` |
+| Domain logic | `src/domain/lesson/`, `src/domain/practice/`, `src/domain/curriculum/` |
+| Lesson UI | `src/components/lesson/` — voice dock, practice card, conversation panel |
+| Auth | `src/middleware.ts`, HttpOnly cookies, `SessionKeepAlive` |
+
+**State:** React hooks (`useLessonFlow`, `useVoiceSession`, `useLearningContextSync`) — no global Redux store.
+
+**Responsive:** App shell + lesson split layout; conversation panel alongside content.
+
+---
+
+## 13. Backend architecture
+
+**Stack:** FastAPI, Pipecat 1.5, Python 3.12, loguru.
+
+| Area | Location |
+|------|----------|
+| Entry | `server/main.py` — HTTP + WebSocket |
+| Pipeline | `server/pipeline.py` — `create_pipeline()` |
+| Processors | `server/processors/` (23 modules) |
+| Services | `server/services/` — STT reconnect, LLM failover |
+| Auth | `server/auth/` — routes, SQLite store, JWT, Argon2 |
+| Security | `server/security.py` — tickets, CORS origin, rate limits |
+| Config | `server/config.py` — env-driven settings |
+| Tutor engine | `server/tutor/` — prompts, FAQ, safety patterns |
+| Audio | `server/audio/` — optional RNNoise |
+| Tests | `server/tests/` — 34 test modules, **397 tests** |
+
+**Session model:** One WebSocket connection = one Pipecat pipeline instance with isolated processor state.
+
+---
+
+## 14. Security
+
+### Implemented
+
+| Mechanism | Detail |
+|-----------|--------|
+| **Authentication** | Email/password signup & signin |
+| **Password hashing** | Argon2id + policy (8+ chars, mixed case, digit, special) |
+| **JWT access tokens** | 15 min, HS256, iss/aud/exp validation |
+| **Refresh tokens** | 14 days, rotated, family revocation on reuse |
+| **WebSocket auth** | Single-use voice ticket in first message — **never in URL** |
+| **CORS** | Explicit `FRONTEND_ORIGIN` in production; wildcard blocked |
+| **CSRF** | Same-origin check on mutating Next.js API routes |
+| **Rate limits** | Auth endpoints + WS connect rate (Redis or SQLite fallback) |
+| **Input sanitization** | Control-marker stripping, field length caps |
+| **Practice secrets** | Server-only; HMAC-signed tutor context |
+| **Env secrets** | `.env` gitignored; no keys in `NEXT_PUBLIC_*` |
+| **Production WSS** | Build/runtime validation — `wss://` required in production |
+
+### Recommended for future production hardening
+
+- PostgreSQL for durable user accounts (SQLite is ephemeral on Render)
+- Redis required (not optional) for multi-instance rate limits + voice JTI
+- JWT validation in Next.js middleware (currently cookie presence only)
+- Centralized monitoring / alerting (not implemented)
+- Secret rotation runbook
+
+---
+
+## 15. Observability & reliability
+
+| Capability | Status |
+|------------|--------|
+| **Structured ops logs** | JSON `ops` events via loguru (`ws_open`, `stt_reconnect_*`, `groq_failover`, etc.) |
+| **`GET /health`** | Process alive — no external API calls |
+| **`GET /ready`** | API keys + production config blockers |
+| **LLM failover** | Cerebras → Groq with ops logging |
+| **STT reconnect** | `ReconnectingSarvamSTTService` on Sarvam WebSocket drop |
+| **Empty LLM guard** | 8 s timeout + spoken fallback |
+| **Voice connection UI** | Banner on WebSocket failure / reconnect |
+| **TTS failure ops event** | Not implemented (would need pipeline hook) |
+| **Metrics dashboard** | **Planned** — not implemented |
+| **Sentry / Datadog** | **Planned** — not implemented |
+
+Logs go to **stdout/stderr** (Render-compatible). No secrets, JWTs, or audio in ops logs.
+
+---
+
+## 16. Performance
+
+### Architecture choices
+
+- **Streaming audio** over WebSocket — not request/response HTTP for voice
+- **Direct browser → Render WSS** — Vercel not in the audio path
+- **Streaming LLM + TTS** — frames forwarded as produced
+- **VAD-driven turns** — no polling for speech detection
+- **Deterministic math speech** — zero extra LLM calls for pronunciation
+- **RNNoise** — optional; fail-safe passthrough; frame-based (~10 ms frames at 48 kHz internal)
+
+### Measured benchmark (optional RNNoise)
+
+From `server/scripts/benchmark_rnnoise.py` on a development machine:
+
+| Metric | Passthrough | RNNoise enabled |
+|--------|-------------|-----------------|
+| Avg per 512-sample frame | ~0.2 µs | ~2.65 ms |
+| p95 | ~0.3 µs | ~5.1 ms |
+
+RNNoise adds negligible latency relative to STT/LLM/TTS; left **disabled by default** for A/B validation.
+
+End-to-end turn latency is dominated by external APIs — no invented p50/p95 numbers for full conversations.
+
+---
+
+## 17. Deployment architecture
+
+```mermaid
+flowchart TB
+  Browser[Student browser]
+  Vercel[Vercel — Next.js]
+  Render[Render — FastAPI + Pipecat]
+  Sarvam[Sarvam]
+  Cerebras[Cerebras]
+  Groq[Groq]
+  Cartesia[Cartesia]
+
+  Browser -->|HTTPS pages + /api/*| Vercel
+  Browser -->|WSS audio direct| Render
+  Vercel -->|HTTPS auth proxy| Render
+  Render --> Sarvam
+  Render --> Cerebras
+  Render --> Groq
+  Render --> Cartesia
+```
+
+**Why WebSocket bypasses Vercel:** Real-time PCM cannot be proxied through serverless functions without unacceptable latency and cost. Only auth/tickets use the Next.js BFF.
+
+Full step-by-step: **[docs/deployment.md](docs/deployment.md)**
+
+---
+
+## 18. Environment variables
+
+### Backend (Render / `server/`)
+
+| Variable | Required (prod) | Scope | Description |
+|----------|-----------------|-------|-------------|
+| `ENVIRONMENT` | yes | server | `production` enables strict mode |
+| `SESSION_SECRET` | yes | server | Signs voice tickets, tutor context HMAC |
+| `AUTH_SECRET` | optional | server | JWT key; defaults to `SESSION_SECRET` |
+| `FRONTEND_ORIGIN` | yes | server | Vercel origin(s) for CORS + WS origin check |
+| `SARVAM_API_KEY` | yes | server | STT |
+| `CEREBRAS_API_KEY` | yes | server | Primary LLM |
+| `CARTESIA_API_KEY` | yes | server | TTS |
+| `GROQ_API_KEY` | recommended | server | LLM failover |
+| `CEREBRAS_API_KEY_2` | optional | server | Second Cerebras rate-limit bucket |
+| `REDIS_URL` | scale | server | Shared auth rate limits |
+| `ALLOW_ANONYMOUS_WS` | yes (`0`) | server | Must be off in production |
+| `RNNOISE_ENABLED` | no | server | `false` default |
+| `HOST` / `PORT` | auto | server | Render injects `PORT`; bind `0.0.0.0` |
+| `MAX_CONCURRENT_SESSIONS` | no | server | Default 20 |
+| `MAX_CONNECTS_PER_IP_PER_MIN` | no | server | Default 8 |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | no | server | Default `lumina` / `lumina-app` |
+| `ACCESS_TTL_SECS` / `REFRESH_TTL_SECS` | no | server | Token lifetimes |
+| `DEFAULT_SESSION_LANGUAGE` | no | server | Default `en-IN` |
+| `LANGUAGE_*` | no | server | Detection tuning |
+| `AUTH_DB_PATH` | no | server | SQLite path (default `server/data/auth.sqlite`) |
+| `DEBUG_TTS_INPUT` | no | server | Dev-only TTS debug |
+
+Template: [`.env.example`](.env.example)
+
+### Frontend (Vercel / `tutor-frontend/`)
+
+| Variable | Required (prod) | Scope | Description |
+|----------|-----------------|-------|-------------|
+| `NEXT_PUBLIC_VOICE_WS_URL` | yes | **browser-safe** | `wss://your-service.onrender.com/ws` |
+| `NEXT_PUBLIC_VOICE_LANG` | no | browser-safe | Default `auto` |
+| `VOICE_API_URL` | yes | server-only | `https://your-service.onrender.com` |
+| `SESSION_SECRET` | yes | server-only | Must match Render |
+| `AUTH_SECRET` | optional | server-only | JWT verification |
+
+Template: [`tutor-frontend/.env.example`](tutor-frontend/.env.example)
+
+**Rule:** Never put API keys or signing secrets in `NEXT_PUBLIC_*`.
+
+---
+
+## 19. Local development
+
+### Prerequisites
+
+- **Python 3.12** (3.13 not supported by current pins)
+- **Node.js 20+**
+- API keys: Sarvam, Cerebras, Cartesia; Groq recommended for failover
+
+### Backend
 
 ```bash
 cd real-time-live-agent
 cp .env.example .env
-# fill CEREBRAS_API_KEY, SARVAM_API_KEY, CARTESIA_API_KEY, GROQ_API_KEY
+# Fill SARVAM_API_KEY, CEREBRAS_API_KEY, CARTESIA_API_KEY, SESSION_SECRET
+
+pip install -r requirements.txt
+
+cd server
+uvicorn main:app --reload --host 0.0.0.0 --port 8805
 ```
 
-**3. Install & run**
+| Check | URL |
+|-------|-----|
+| Health | http://127.0.0.1:8805/health |
+| Readiness | http://127.0.0.1:8805/ready |
+| WebSocket | ws://127.0.0.1:8805/ws |
 
-```powershell
-cd real-time-live-agent\server
-..\voice-agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8805
+### Frontend
+
+```bash
+cd tutor-frontend
+cp .env.example .env.local
+# Match SESSION_SECRET with backend .env
+
+npm ci
+npm run dev
 ```
 
-If the venv is missing, create one with system Python 3.12 and install from `requirements.txt` / `voice-agent/pyproject.toml`.
+Open **http://localhost:3000**
 
-**4. Open the tutor**
+### Run tests
 
-[http://localhost:3000](http://localhost:3000) — Next.js app in `tutor-frontend/`.
+```bash
+# Backend (from server/)
+pytest -q
 
-The voice engine is `ws://127.0.0.1:8805/ws`. A leftover static page at [http://localhost:8805/](http://localhost:8805/) talks to the same engine and is not the product UI.
-
-Health checks:
-
-- `GET /health` → `{"status":"ok"}`
-- `GET /ready` → ready when STT/LLM keys are present
-
----
-
-## Deploy (Vercel + Render)
-
-Full guide: **[docs/deployment.md](docs/deployment.md)** (architecture, env vars, CORS, WebSocket, troubleshooting, deployment order).
-
-| Component | Directory | Platform |
-|-----------|-----------|----------|
-| Frontend | `tutor-frontend/` | Vercel (Root Directory = `tutor-frontend`) |
-| Backend | `server/` + root `requirements.txt` | Render (Blueprint: `render.yaml`) |
-
-**Quick start**
-
-1. Deploy Render backend → copy `https://YOUR-SERVICE.onrender.com`
-2. Vercel env: `NEXT_PUBLIC_VOICE_WS_URL=wss://YOUR-SERVICE.onrender.com/ws`, `VOICE_API_URL=https://YOUR-SERVICE.onrender.com`, `SESSION_SECRET=…`
-3. Render env: `FRONTEND_ORIGIN=https://YOUR-APP.vercel.app`, API keys, `ENVIRONMENT=production`
-4. Restart Render after setting `FRONTEND_ORIGIN`
-
-Voice audio: **browser → Render WebSocket directly** (not proxied through Vercel).
-
----
-
-## Conversation design (what Ministros optimizes for)
-
-Ministros is prompted and post-processed to behave like a phone call:
-
-- One or two short spoken sentences
-- Contractions, informal English (or Hindi when configured)
-- No markdown, code, or “As an AI…” disclaimers
-- Follow-ups keep prior **intent** when you only change a detail (“London” after “weather in the US”)
-- Name-only pings get a short “I’m here,” not a sales pitch
-
-That personality lives in `server/tutor/prompts.py` and `server/processors/naturalizer.py`. Maths is spoken by `server/processors/speak_math.py` without an extra LLM call.
-
----
-
-## Reliability patterns
-
-```mermaid
-flowchart LR
-  A["LLM call"] --> B{"OK stream?"}
-  B -->|yes| C["Naturalizer → TTS"]
-  B -->|429 / error| D["Groq failover"]
-  D --> C
-  B -->|empty / timeout| E["LLMEmptyGuard<br/>spoken fallback"]
-  E --> C
+# Frontend (from tutor-frontend/)
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
-Additional guards:
-
-- **TranscriptionDedup** / **LLMInferenceDedup** — stop double answers from racing stop strategies  
-- **TurnReset** — drop half-spoken assistant text after barge-in so context stays coherent  
-- **AudioGate** — reduce false triggers from the bot’s own speaker output  
+CI runs both on push/PR via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ---
 
-## Configuration reference
+## 20. Production deployment
 
-### Production environment checklist
+### Backend → Render
 
-Copy templates — **never commit real secrets**:
+1. Connect GitHub repo; use [`render.yaml`](render.yaml) or manual Web Service
+2. **Root directory:** `.` (repo root)
+3. **Build:** `pip install --upgrade pip && pip install -r requirements.txt`
+4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server`
+5. **Plan:** Standard (~2 GB RAM) — torch + Silero need memory
+6. Set secrets: API keys, `SESSION_SECRET`, `ENVIRONMENT=production`, `ALLOW_ANONYMOUS_WS=0`
+7. Confirm `https://YOUR-SERVICE.onrender.com/health`
 
-| File | Purpose |
-|---|---|
-| [`.env.example`](.env.example) | FastAPI / voice backend |
-| [`tutor-frontend/.env.example`](tutor-frontend/.env.example) | Next.js tutor UI |
+### Frontend → Vercel
 
-**Restart Next.js** (`next dev` or redeploy) after any `.env.local` change — env vars are read at process start.
+1. Import repo; set **Root Directory** = `tutor-frontend`
+2. Set env vars (see [§18](#18-environment-variables))
+3. Deploy; note Vercel URL
+4. Set Render `FRONTEND_ORIGIN=https://YOUR-APP.vercel.app`
+5. **Restart Render** after CORS change
+6. Test sign-in → lesson → **Talk to tutor**
 
-#### Backend (`real-time-live-agent/.env`)
-
-| Variable | Required | Scope | Purpose |
-|---|---|---|---|
-| `ENVIRONMENT` | prod | server | Set to `production` on Render/host |
-| `SESSION_SECRET` | prod | server | Signs voice tickets, JWTs, tutor context. **Never `NEXT_PUBLIC_`.** |
-| `AUTH_SECRET` | optional | server | Dedicated JWT key; defaults to `SESSION_SECRET` |
-| `FRONTEND_ORIGIN` | prod | server | Comma-separated Next.js origin(s) for CORS + WS origin checks. No wildcard in prod. |
-| `SARVAM_API_KEY` | yes | server | Speech-to-text |
-| `CEREBRAS_API_KEY` | yes | server | Primary LLM |
-| `CARTESIA_API_KEY` | yes | server | Text-to-speech |
-| `GROQ_API_KEY` | recommended | server | LLM failover |
-| `CEREBRAS_API_KEY_2` | optional | server | Second Cerebras rate-limit bucket |
-| `REDIS_URL` | prod scale | server | Shared auth rate limits across instances |
-| `HOST` / `PORT` | no | server | Bind address (Render injects `PORT`) |
-| `RNNOISE_ENABLED` | no | server | Optional server-side RNNoise (`false` default). Requires `pyrnnoise` wheel. |
-
-#### Optional RNNoise (server-side denoising)
-
-Pipeline order: **AudioGate → RNNoise → Silero VAD → STT**. Browser already applies AEC/NS/AGC; RNNoise is an optional second stage for noisy environments.
-
-| Setting | Value |
-|---|---|
-| Default | `RNNOISE_ENABLED=false` (passthrough — existing behavior) |
-| Enable | `RNNOISE_ENABLED=true` + install `pyrnnoise>=0.4.3` (prebuilt librnnoise wheel) |
-| Sample rates | 16 kHz pipeline ↔ 48 kHz RNNoise boundary (480-sample / 10 ms frames) |
-| Fail-safe | Missing library or processing error → original PCM forwarded; session continues |
-
-Benchmark locally: `python server/scripts/benchmark_rnnoise.py --compare`
-
-#### Frontend (`tutor-frontend/.env.local`)
-
-| Variable | Required | Scope | Purpose |
-|---|---|---|---|
-| `NEXT_PUBLIC_VOICE_WS_URL` | yes | **browser-safe** | Voice WebSocket. **Production must be `wss://`** |
-| `NEXT_PUBLIC_VOICE_LANG` | no | browser-safe | `auto` for multilingual STT |
-| `SESSION_SECRET` | prod | server-only | Must match backend; verifies cookies in API routes |
-| `AUTH_SECRET` | optional | server-only | JWT verification; defaults to `SESSION_SECRET` |
-| `VOICE_API_URL` | yes | server-only | FastAPI origin for auth proxy (`http://127.0.0.1:8805` locally) |
-
-**Rule:** Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser. Never put API keys or signing secrets in `NEXT_PUBLIC_*`.
-
-#### CORS and WSS
-
-- **Development:** empty `FRONTEND_ORIGIN` → backend allows local Next.js (`*` CORS).
-- **Production:** set `FRONTEND_ORIGIN=https://your-app.vercel.app` — wildcard CORS is blocked by `/ready`.
-- **Production voice URL:** `NEXT_PUBLIC_VOICE_WS_URL=wss://your-backend/ws` — build fails if `ws://` is used.
-
-See also [`docs/LONG_SESSION_TEST_CHECKLIST.md`](docs/LONG_SESSION_TEST_CHECKLIST.md) for manual long-session QA.
-
-### Legacy variable table
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `CEREBRAS_API_KEY` | yes | Primary LLM |
-| `SARVAM_API_KEY` | yes | Speech-to-text |
-| `CARTESIA_API_KEY` | yes | Text-to-speech |
-| `GROQ_API_KEY` | recommended | LLM failover |
-| `FRONTEND_ORIGIN` | prod | CORS allowlist for the Next.js origin(s) |
-| `HOST` / `PORT` | no | Bind address (Render injects `PORT`) |
-| `ENVIRONMENT` | prod | Set to `production` to disable debug TTS text logs |
-| `NEXT_PUBLIC_VOICE_WS_URL` | Vercel | `wss://…/ws` for the Next.js tutor UI |
+Detailed guide: **[docs/deployment.md](docs/deployment.md)**
 
 ---
 
-## Roadmap ideas
+## 21. Testing / QA
 
-- Live latency metrics dashboard (p50/p95 from Pipecat `enable_metrics`)
-- Multi-language UI selector beyond `en-IN`
-- Auth-gated sessions for multi-tenant deployments
+### Automated
+
+| Suite | Command | Count |
+|-------|---------|-------|
+| Backend | `cd server && pytest -q` | 397 tests |
+| Frontend unit | `cd tutor-frontend && npm test` | Vitest (protocol, voice, lesson flow, auth helpers) |
+| CI | GitHub Actions | lint + typecheck + test + build |
+
+### Manual regression checklist
+
+**Voice**
+
+- [ ] Connect, speak, receive transcript + TTS
+- [ ] Interrupt mid-sentence (barge-in)
+- [ ] 5+ minute session without silent stall
+- [ ] WebSocket reconnect banner appears on disconnect
+
+**Tutor**
+
+- [ ] Tutor references current slide content
+- [ ] Doubt on visible formula/example
+- [ ] Practice hint without revealing answer in UI
+- [ ] Typed chat works alongside voice
+
+**Language**
+
+- [ ] Hindi ↔ English switch mid-session
+- [ ] Tamil / Telugu transcription (if available in Sarvam)
+
+**Mathematics**
+
+- [ ] Fractions and powers spoken naturally in TTS
+- [ ] KaTeX renders correctly in transcript
+
+**Security**
+
+- [ ] Unauthenticated routes redirect to sign-in
+- [ ] Voice session requires login (401 without cookie)
+- [ ] WebSocket rejects `?token=` query param
+
+**UI**
+
+- [ ] Dashboard → chapter → topic navigation
+- [ ] Lesson next/previous; practice gating
+- [ ] Mobile viewport usable
+
+Full long-session matrix: **[docs/LONG_SESSION_TEST_CHECKLIST.md](docs/LONG_SESSION_TEST_CHECKLIST.md)**
 
 ---
 
-## License & credits
+## 22. Error & failure behavior
 
-Built on [Pipecat](https://github.com/pipecat-ai/pipecat), Sarvam, Cerebras, Groq, and Cartesia.
+| Failure | Behavior |
+|---------|----------|
+| **Sarvam STT drop** | `ReconnectingSarvamSTTService` reconnects; ops `stt_reconnect_*` logs |
+| **Cerebras rate limit** | Ops `cerebras_429`; failover to next provider |
+| **All LLMs fail** | Error re-raised; `LLMEmptyGuard` speaks fallback line |
+| **Empty LLM output** | 8 s timeout → injected spoken fallback |
+| **TTS error** | Pipeline error logged; user may hear silence for that turn |
+| **WebSocket disconnect** | Client reconnect backoff; banner “Voice connection lost” |
+| **WS auth failure** | Close 4401; user must End → Talk again |
+| **RNNoise failure** | Passthrough original PCM; session continues |
+| **Auth failure** | Generic “invalid credentials”; no email enumeration |
+| **User interrupts** | Playback stops; partial assistant text removed from context |
+| **Safety phrase** | Supportive response + banner; tutoring can resume |
+
+---
+
+## 23. Project structure
+
+```
+real-time-live-agent/
+├── tutor-frontend/          # Next.js → Vercel
+│   ├── src/app/             # Routes + API BFF
+│   ├── src/components/      # UI (lesson, auth, dashboard)
+│   ├── src/content/         # Curriculum data (Class 10 Maths)
+│   ├── src/domain/          # Lesson flow, practice, curriculum types
+│   ├── src/lib/voice/       # VoiceAgentClient, protocol
+│   ├── src/hooks/           # useVoiceSession, useLessonFlow
+│   └── public/              # audio-processor.js (AudioWorklet)
+├── server/                  # FastAPI + Pipecat → Render
+│   ├── main.py              # HTTP + WebSocket entry
+│   ├── pipeline.py          # Pipecat pipeline assembly
+│   ├── processors/          # Frame processors (23 modules)
+│   ├── services/            # STT reconnect, LLM failover
+│   ├── auth/                # User auth (SQLite)
+│   ├── tutor/               # Prompts, FAQ, safety
+│   ├── audio/               # Optional RNNoise
+│   └── tests/               # Pytest suite
+├── docs/                    # deployment.md, ARCHITECTURE.md, QA checklists
+├── requirements.txt         # Python deps (Render build)
+├── render.yaml              # Render Blueprint
+└── .github/workflows/ci.yml
+```
+
+Legacy debug client in `client/` — not the product UI.
+
+---
+
+## 24. API & WebSocket reference
+
+### HTTP (FastAPI)
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/health` | None | Liveness probe |
+| `GET` | `/ready` | None | Readiness (keys + prod config) |
+| `POST` | `/auth/signup` | None | Create account |
+| `POST` | `/auth/signin` | None | Sign in → tokens |
+| `POST` | `/auth/refresh` | Refresh body | Rotate tokens |
+| `POST` | `/auth/signout` | Optional Bearer | Revoke refresh family |
+| `GET` | `/auth/me` | Bearer JWT | Current user id |
+| `POST` | `/auth/voice-ticket` | Bearer JWT | Mint single-use WS ticket |
+
+### Next.js BFF (same-origin)
+
+| Method | Path | Auth | Proxies to |
+|--------|------|------|------------|
+| `POST` | `/api/auth/signin` | Public | Render `/auth/signin` |
+| `POST` | `/api/auth/signup` | Public | Render `/auth/signup` |
+| `POST` | `/api/auth/refresh` | Cookie | Render `/auth/refresh` |
+| `POST` | `/api/auth/signout` | Cookie | Render `/auth/signout` |
+| `GET` | `/api/auth/me` | Cookie | Render `/auth/me` |
+| `POST` | `/api/voice/session` | Cookie | Voice ticket for WebSocket |
+| `POST` | `/api/tutor-context` | Cookie | Signed tutor context |
+| `POST` | `/api/practice/evaluate` | Cookie | Answer evaluation |
+| `POST` | `/api/practice/hint` | Cookie | Hint text |
+| `POST` | `/api/practice/solution` | Cookie | Solution reveal |
+
+### WebSocket
+
+| Path | Auth | Protocol |
+|------|------|----------|
+| `/ws` | Voice ticket in first JSON frame | Binary PCM16 + JSON control |
+
+**Control message types (client → server):** `auth`, `session_context`, `learning_context`, `tutor_context`, `text_input`, `interrupt`, `tts_voice`
+
+**Close codes:** 4401 unauthorized · 4403 origin · 4408 not ready · 4429 rate limit · 1013 capacity
+
+---
+
+## 25. Design principles
+
+1. **Real-time first** — streaming frames, not batch audio
+2. **Context-aware tutoring** — lesson slide is part of the prompt
+3. **Natural conversation** — spoken-style naturalizer, not markdown read aloud
+4. **Fail safely** — RNNoise, STT, LLM degrade gracefully
+5. **Minimal latency** — direct WSS; no Vercel audio proxy
+6. **Separation of concerns** — display math ≠ spoken math; public topic ≠ tutor secrets
+7. **Secure by default** — production blocks wildcard CORS and anonymous WS
+8. **No unnecessary LLM calls** — safety regex, deterministic math speech
+9. **Preserve student context** — interruption resets partial reply, not session
+10. **Graceful degradation** — failover chain, empty guard, reconnect wrappers
+
+---
+
+## 26. Roadmap
+
+### Currently implemented
+
+Everything listed in [§2 Key features](#2-key-features).
+
+### Future / production hardening (not yet implemented)
+
+| Item | Status |
+|------|--------|
+| PostgreSQL user storage | **Planned** — SQLite ephemeral on Render |
+| Redis required for multi-instance | **Planned** — optional today |
+| Metrics dashboard (p50/p95 latency) | **Planned** |
+| TTS failure structured logging | **Planned** |
+| Additional subjects (English Class 10) | **Planned** — placeholder in catalog |
+| E2E tests (Playwright) | **Planned** |
+| JWT validation in Next.js middleware | **Planned** |
+| RNNoise enabled by default in production | **Pending validation** — off by default |
+
+---
+
+## 27. FAQ
+
+**How does voice communication work?**  
+Browser captures PCM16 @ 16 kHz via AudioWorklet, sends binary frames over WebSocket to Render. Pipecat pipeline runs STT → LLM → TTS; audio streams back on the same socket.
+
+**How does interruption work?**  
+Client flushes playback and sends `interrupt`; server Silero VAD + AudioGate + Pipecat cancellation stop TTS; `TurnResetProcessor` cleans partial assistant context.
+
+**How does current-page context reach the LLM?**  
+`useLearningContextSync` sends `learning_context` JSON when the student navigates slides. `SessionContextProcessor` injects sanitized system notes before the LLM turn.
+
+**How is math pronounced?**  
+Transcript keeps KaTeX. `speak_math.py` transforms LLM text to spoken English before Cartesia TTS — separate from display rendering.
+
+**How does multilingual support work?**  
+Sarvam auto-detects language; `LanguageTrackerProcessor` updates session language (`en-IN`, `hi-IN`, `ta-IN`, `te-IN`). Prompts and naturalizer adapt; TTS language updates mid-session.
+
+**What happens if Cerebras fails?**  
+`FailoverLLMService` tries optional second Cerebras key, then Groq. Ops logs capture each failure. If all fail, empty guard speaks a fallback.
+
+**Where are secrets stored?**  
+Backend `.env` (Render dashboard). Frontend `.env.local` (Vercel dashboard) — only `SESSION_SECRET` and `VOICE_API_URL` server-side; API keys never in the browser.
+
+**How do I deploy?**  
+See [§20](#20-production-deployment) and [docs/deployment.md](docs/deployment.md).
+
+**How do I debug a voice connection?**  
+Check browser DevTools → Network → WS. Verify `NEXT_PUBLIC_VOICE_WS_URL`, matching `SESSION_SECRET`, and Render `FRONTEND_ORIGIN`. Look for ops logs: `ws_auth_failure`, `ws_open`.
+
+**How do I add a new topic?**  
+Add content under `tutor-frontend/src/content/curriculum/class10/mathematics/chapters/` and register in `catalog.ts`. Run frontend validation tests.
+
+---
+
+## 28. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| 401 on voice session | `SESSION_SECRET` mismatch | Align Vercel + Render secrets; restart both |
+| WebSocket close 4403 | Wrong origin | Set `FRONTEND_ORIGIN` to exact Vercel URL; restart Render |
+| WebSocket close 4408 | Missing API keys or prod config | Check `/ready` in dev; fill Render env |
+| CORS error on sign-in | `FRONTEND_ORIGIN` unset/wrong | Set on Render |
+| Vercel build fails | `ws://` in production WS URL | Use `wss://` for `NEXT_PUBLIC_VOICE_WS_URL` |
+| Mic permission error | Browser blocked mic | Allow mic; close other apps using mic |
+| No STT transcripts | Sarvam key or STT disconnect | Check Render logs for `stt_connection_failure` |
+| No TTS audio | Cartesia key or pipeline error | Check `/ready`; Render logs |
+| Env change ignored | Next.js caches env at start | Redeploy / restart `next dev` |
+| Users lost after deploy | SQLite on ephemeral disk | Expected until Postgres migration |
+
+---
+
+## 29. Technology stack
+
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| Frontend | Next.js 15, React 19, TypeScript | Learning UI + BFF |
+| Styling | Tailwind CSS 4 | Layout and components |
+| Math display | KaTeX | Transcript rendering |
+| Backend | FastAPI, Uvicorn | HTTP + WebSocket server |
+| Voice orchestration | Pipecat 1.5 | Real-time frame pipeline |
+| STT | Sarvam (`saaras:v3`) | Speech recognition |
+| LLM (primary) | Cerebras (`gpt-oss-120b`) | Tutor reasoning |
+| LLM (fallback) | Groq (`openai/gpt-oss-120b`) | Rate-limit failover |
+| TTS | Cartesia (`sonic-3.5`) | Speech synthesis |
+| VAD | Silero (via Pipecat) | Speech detection |
+| Turn detection | LocalSmartTurnAnalyzerV3 | End-of-turn |
+| Noise suppression | RNNoise (optional, `pyrnnoise`) | Server-side denoising |
+| Auth | Argon2id, PyJWT, SQLite | User sessions |
+| CI | GitHub Actions | lint, test, build |
+
+---
+
+## 30. License & credits
+
+Built on [Pipecat](https://github.com/pipecat-ai/pipecat) with [Sarvam](https://www.sarvam.ai/), [Cerebras](https://cerebras.ai/), [Groq](https://groq.com/), and [Cartesia](https://cartesia.ai/).
 
 ---
 
 <p align="center">
-  <strong>Lumina</strong> — a Class 10 maths tutor you can actually talk to.<br/>
-  <sub>Questions or improvements? Open an issue on the repo.</sub>
+  <sub>
+    Lumina — context-aware Class 10 maths tutoring with a voice that listens, explains, and lets you interrupt.
+  </sub>
 </p>
