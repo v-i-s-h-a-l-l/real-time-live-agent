@@ -42,6 +42,8 @@ export interface PracticeQuestion {
   acceptedAnswers?: string[];
   /** Step-by-step solution — for tutor/engine use; hidden until revealed in UI. */
   solution: string[];
+  /** When secrets are stripped for the client, the original hint list length. */
+  hintCount?: number;
   /** Optional links to concept note ids within the same topic. */
   conceptNoteIds?: string[];
 }

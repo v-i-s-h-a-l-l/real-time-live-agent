@@ -10,13 +10,17 @@ export const VOICE_WS_URL =
 /** Language query param forwarded to the voice engine (`auto` = multilingual). */
 export const VOICE_DEFAULT_LANG = process.env.NEXT_PUBLIC_VOICE_LANG ?? "auto";
 
-if (
+const _prodWsInsecure =
   process.env.NODE_ENV === "production" &&
-  VOICE_WS_URL.includes("127.0.0.1")
-) {
-  console.warn(
-    "[Lumina] NEXT_PUBLIC_VOICE_WS_URL is still the local default. Set it to the deployed engine (wss://…) or voice will not connect.",
-  );
+  !VOICE_WS_URL.startsWith("wss://");
+
+if (_prodWsInsecure) {
+  const message =
+    "[Lumina] NEXT_PUBLIC_VOICE_WS_URL must use wss:// in production.";
+  if (typeof window === "undefined") {
+    throw new Error(message);
+  }
+  console.error(message);
 }
 
 /** AudioWorklet module URL (served from /public). */

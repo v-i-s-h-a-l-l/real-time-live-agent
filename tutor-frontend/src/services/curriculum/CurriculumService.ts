@@ -180,10 +180,12 @@ export class CurriculumService {
 /** App-wide singleton for the static Class 10 catalog. */
 export const curriculumService = new CurriculumService();
 
-/** Fail fast in development if catalog content is invalid. */
-if (process.env.NODE_ENV !== "production") {
-  const result = curriculumService.validateContent();
-  if (!result.ok) {
-    console.error("[curriculum] validation failed:", result.issues.slice(0, 20));
+/** Fail the process if the catalog is invalid. */
+const _curriculumCheck = curriculumService.validateContent();
+if (!_curriculumCheck.ok) {
+  if (process.env.NODE_ENV === "production") {
+    curriculumService.assertContentValid();
+  } else {
+    console.error("[curriculum] validation failed:", _curriculumCheck.issues.slice(0, 20));
   }
 }

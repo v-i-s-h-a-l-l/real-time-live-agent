@@ -101,6 +101,33 @@ def test_question_change_resets_hints():
     assert state.hints_used == 0
 
 
+def test_evaluate_directive_withholds_expected_answer():
+    engine = TutorEngine()
+    state = TutorState(phase="practice", current_question_id="q1")
+    tutor_context = {
+        "questionId": "q1",
+        "expectedAnswer": "SECRET_KEY_42",
+        "solution": ["Do not leak this step"],
+    }
+    decision = engine.decide(
+        "I think the roots are 1 and 4",
+        state,
+        tutor_context=tutor_context,
+        learning_context={"phase": "practice", "questionId": "q1"},
+    )
+    directive = build_tutor_turn_directive(
+        decision=decision,
+        state=state,
+        learning_context={"phase": "practice", "question": "Solve x^2 - 5x + 6 = 0"},
+        tutor_context=tutor_context,
+        utterance="I think the roots are 1 and 4",
+    )
+    assert "SECRET_KEY_42" not in directive
+    assert "Do not leak this step" not in directive
+    if decision.mode.value in {"evaluate", "correct", "socratic"}:
+        assert "withheld" in directive.lower()
+
+
 def test_directive_separates_visible_and_tutor_only():
     engine = TutorEngine()
     state = TutorState(

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Source_Sans_3 } from "next/font/google";
 
+import { SessionKeepAlive } from "@/components/auth/SessionKeepAlive";
 import "./globals.css";
 
 const sourceSans = Source_Sans_3({
@@ -30,7 +31,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${sourceSans.variable} ${fraunces.variable}`}>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <SessionKeepAlive />
+        {children}
+      </body>
     </html>
   );
 }

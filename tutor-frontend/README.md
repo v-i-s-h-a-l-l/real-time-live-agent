@@ -1,44 +1,66 @@
-# Lumina — Class 10 AI Tutor (Phase 1–2 frontend)
+# Frontend — Next.js tutor (Vercel)
 
-Next.js + TypeScript client for the **existing** FastAPI / Pipecat voice engine.
+Student-facing Lumina tutor UI. Deploy to **Vercel**; voice engine runs on **Render** ([`../server/`](../server/)).
 
-## Run locally
+## Local development
 
-1. Start the voice engine (from `real-time-live-agent/server`):
-
-```powershell
-..\voice-agent\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8805
-```
-
-2. Start this app:
-
-```powershell
+```bash
 cd tutor-frontend
-npm install
-npm run dev
+cp .env.example .env.local    # match SESSION_SECRET with backend .env
+npm ci
+npm run dev                   # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Backend must be running at `VOICE_API_URL` (default `http://127.0.0.1:8805`).
 
-Configure `NEXT_PUBLIC_VOICE_WS_URL` in `.env.local` (default `ws://127.0.0.1:8805/ws`).
+## Vercel deployment
 
-## Architecture
+| Setting | Value |
+|---------|-------|
+| **Root directory** | `tutor-frontend` |
+| **Framework** | Next.js (auto-detected) |
+| **Build** | `npm run build` |
+| **Install** | `npm ci` |
 
-| Layer | Location | Role |
-|-------|----------|------|
-| Content data | `src/content/curriculum/` | Static Class 10 Math chapters/topics |
-| Domain | `src/domain/curriculum/` | Types + session context builder |
-| CurriculumService | `src/services/curriculum/` | Read API for UI/session |
-| Voice Engine | `../server` | Domain-agnostic Pipecat pipeline |
-| Frontend | `src/app`, `src/components` | LMS navigation + voice session |
+Or connect the repo and set **Root Directory** to `tutor-frontend` in the Vercel project settings.
 
-Do **not** put WebSocket / AudioWorklet logic in React components — use `src/lib/voice/VoiceAgentClient.ts` via `useVoiceSession`.
+[`vercel.json`](./vercel.json) is included for install/build defaults.
+
+## Environment variables (Vercel dashboard)
+
+### Browser-safe (`NEXT_PUBLIC_*`)
+
+| Variable | Example |
+|----------|---------|
+| `NEXT_PUBLIC_VOICE_WS_URL` | `wss://your-service.onrender.com/ws` |
+| `NEXT_PUBLIC_VOICE_LANG` | `auto` |
+
+### Server-only (Next.js API routes — never `NEXT_PUBLIC_`)
+
+| Variable | Example |
+|----------|---------|
+| `VOICE_API_URL` | `https://your-service.onrender.com` |
+| `SESSION_SECRET` | same as Render backend |
+| `AUTH_SECRET` | optional; defaults to `SESSION_SECRET` |
+
+**Important:** Voice WebSocket connects **browser → Render directly** (`NEXT_PUBLIC_VOICE_WS_URL`). Audio is **not** proxied through Vercel.
+
+Auth and voice tickets: browser → Vercel `/api/*` → Render HTTP API.
+
+## API / voice modules
+
+| Module | Purpose |
+|--------|---------|
+| [`src/lib/api.ts`](./src/lib/api.ts) | Server-side Render HTTP proxy |
+| [`src/lib/voice.ts`](./src/lib/voice.ts) | WebSocket URL + voice constants |
 
 ## Scripts
 
-```powershell
-npm run typecheck
+```bash
 npm run lint
+npm run typecheck
 npm test
 npm run build
 ```
+
+Full deployment guide: [`../docs/deployment.md`](../docs/deployment.md)

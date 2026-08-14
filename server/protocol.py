@@ -40,6 +40,10 @@ CLIENT_LEARNING_CONTEXT: Final = "learning_context"
 #: Tutor-only material (hints, solutions) that must never be shown on screen.
 CLIENT_TUTOR_CONTEXT: Final = "tutor_context"
 
+#: First text frame after the socket opens. Not a pipeline message.
+CLIENT_AUTH: Final = "auth"
+SERVER_AUTH_OK: Final = "auth_ok"
+
 #: Speaker id the engine attaches to transcriptions that came from typed
 #: input rather than the microphone. Mirrored by the browser as
 #: ``TEXT_INPUT_USER_ID`` in ``tutor-frontend/src/lib/voice/protocol.ts``.

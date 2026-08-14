@@ -2,8 +2,10 @@
 
 Class 10 Mathematics AI tutor with a live voice session. The student studies a lesson in the browser and talks to the tutor over a WebSocket.
 
-**Product UI:** `tutor-frontend/` (Next.js)  
-**Voice engine:** `server/` (FastAPI + Pipecat — Sarvam STT · Cerebras/Groq LLM · Cartesia TTS)
+**Product UI:** `tutor-frontend/` (Next.js → **Vercel**)  
+**Voice engine:** `server/` (FastAPI + Pipecat → **Render**)
+
+**Production deploy:** [docs/deployment.md](docs/deployment.md) — Vercel frontend, Render backend, env vars, WebSocket, CORS, deployment order.
 
 Engineer overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -284,29 +286,21 @@ Health checks:
 
 ## Deploy (Vercel + Render)
 
-### Backend → Render
+Full guide: **[docs/deployment.md](docs/deployment.md)** (architecture, env vars, CORS, WebSocket, troubleshooting, deployment order).
 
-1. Push this repo to GitHub.
-2. Create a **Web Service**, root directory `real-time-live-agent`.
-3. **Build:** `pip install --upgrade pip && pip install -r requirements.txt`  
-4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server`
-5. Use at least a **Standard (~2 GB)** instance — torch + voice stack is heavy for free tiers.
-6. Set secrets: `CEREBRAS_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `GROQ_API_KEY`, and later `FRONTEND_ORIGIN=https://your-app.vercel.app`.
-7. Also set (avoids Rust/maturin read-only build failures):
-   - `CARGO_HOME=/opt/render/project/src/.cargo`
-   - `RUSTUP_HOME=/opt/render/project/src/.rustup`
-8. Confirm `https://YOUR-SERVICE.onrender.com/health`.
+| Component | Directory | Platform |
+|-----------|-----------|----------|
+| Frontend | `tutor-frontend/` | Vercel (Root Directory = `tutor-frontend`) |
+| Backend | `server/` + root `requirements.txt` | Render (Blueprint: `render.yaml`) |
 
-**Root Directory:** leave **blank** (this GitHub repo is already the project root — do not set `real-time-live-agent`).
+**Quick start**
 
-Optional Blueprint: `render.yaml`.
+1. Deploy Render backend → copy `https://YOUR-SERVICE.onrender.com`
+2. Vercel env: `NEXT_PUBLIC_VOICE_WS_URL=wss://YOUR-SERVICE.onrender.com/ws`, `VOICE_API_URL=https://YOUR-SERVICE.onrender.com`, `SESSION_SECRET=…`
+3. Render env: `FRONTEND_ORIGIN=https://YOUR-APP.vercel.app`, API keys, `ENVIRONMENT=production`
+4. Restart Render after setting `FRONTEND_ORIGIN`
 
-### Frontend → Vercel
-
-1. New project, root directory `real-time-live-agent/tutor-frontend`.
-2. Build: `npm run build`.
-3. Env: `NEXT_PUBLIC_VOICE_WS_URL=wss://YOUR-SERVICE.onrender.com/ws`
-4. Deploy and open the Vercel URL. Set `FRONTEND_ORIGIN` on the backend to that origin.
+Voice audio: **browser → Render WebSocket directly** (not proxied through Vercel).
 
 ---
 
@@ -346,6 +340,69 @@ Additional guards:
 
 ## Configuration reference
 
+### Production environment checklist
+
+Copy templates — **never commit real secrets**:
+
+| File | Purpose |
+|---|---|
+| [`.env.example`](.env.example) | FastAPI / voice backend |
+| [`tutor-frontend/.env.example`](tutor-frontend/.env.example) | Next.js tutor UI |
+
+**Restart Next.js** (`next dev` or redeploy) after any `.env.local` change — env vars are read at process start.
+
+#### Backend (`real-time-live-agent/.env`)
+
+| Variable | Required | Scope | Purpose |
+|---|---|---|---|
+| `ENVIRONMENT` | prod | server | Set to `production` on Render/host |
+| `SESSION_SECRET` | prod | server | Signs voice tickets, JWTs, tutor context. **Never `NEXT_PUBLIC_`.** |
+| `AUTH_SECRET` | optional | server | Dedicated JWT key; defaults to `SESSION_SECRET` |
+| `FRONTEND_ORIGIN` | prod | server | Comma-separated Next.js origin(s) for CORS + WS origin checks. No wildcard in prod. |
+| `SARVAM_API_KEY` | yes | server | Speech-to-text |
+| `CEREBRAS_API_KEY` | yes | server | Primary LLM |
+| `CARTESIA_API_KEY` | yes | server | Text-to-speech |
+| `GROQ_API_KEY` | recommended | server | LLM failover |
+| `CEREBRAS_API_KEY_2` | optional | server | Second Cerebras rate-limit bucket |
+| `REDIS_URL` | prod scale | server | Shared auth rate limits across instances |
+| `HOST` / `PORT` | no | server | Bind address (Render injects `PORT`) |
+| `RNNOISE_ENABLED` | no | server | Optional server-side RNNoise (`false` default). Requires `pyrnnoise` wheel. |
+
+#### Optional RNNoise (server-side denoising)
+
+Pipeline order: **AudioGate → RNNoise → Silero VAD → STT**. Browser already applies AEC/NS/AGC; RNNoise is an optional second stage for noisy environments.
+
+| Setting | Value |
+|---|---|
+| Default | `RNNOISE_ENABLED=false` (passthrough — existing behavior) |
+| Enable | `RNNOISE_ENABLED=true` + install `pyrnnoise>=0.4.3` (prebuilt librnnoise wheel) |
+| Sample rates | 16 kHz pipeline ↔ 48 kHz RNNoise boundary (480-sample / 10 ms frames) |
+| Fail-safe | Missing library or processing error → original PCM forwarded; session continues |
+
+Benchmark locally: `python server/scripts/benchmark_rnnoise.py --compare`
+
+#### Frontend (`tutor-frontend/.env.local`)
+
+| Variable | Required | Scope | Purpose |
+|---|---|---|---|
+| `NEXT_PUBLIC_VOICE_WS_URL` | yes | **browser-safe** | Voice WebSocket. **Production must be `wss://`** |
+| `NEXT_PUBLIC_VOICE_LANG` | no | browser-safe | `auto` for multilingual STT |
+| `SESSION_SECRET` | prod | server-only | Must match backend; verifies cookies in API routes |
+| `AUTH_SECRET` | optional | server-only | JWT verification; defaults to `SESSION_SECRET` |
+| `VOICE_API_URL` | yes | server-only | FastAPI origin for auth proxy (`http://127.0.0.1:8805` locally) |
+
+**Rule:** Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser. Never put API keys or signing secrets in `NEXT_PUBLIC_*`.
+
+#### CORS and WSS
+
+- **Development:** empty `FRONTEND_ORIGIN` → backend allows local Next.js (`*` CORS).
+- **Production:** set `FRONTEND_ORIGIN=https://your-app.vercel.app` — wildcard CORS is blocked by `/ready`.
+- **Production voice URL:** `NEXT_PUBLIC_VOICE_WS_URL=wss://your-backend/ws` — build fails if `ws://` is used.
+
+See also [`docs/LONG_SESSION_TEST_CHECKLIST.md`](docs/LONG_SESSION_TEST_CHECKLIST.md) for manual long-session QA.
+
+### Legacy variable table
+
 | Variable | Required | Purpose |
 |---|---|---|
 | `CEREBRAS_API_KEY` | yes | Primary LLM |
@@ -363,7 +420,6 @@ Additional guards:
 
 - Live latency metrics dashboard (p50/p95 from Pipecat `enable_metrics`)
 - Multi-language UI selector beyond `en-IN`
-- Optional RNNoise path when native deps are healthy
 - Auth-gated sessions for multi-tenant deployments
 
 ---

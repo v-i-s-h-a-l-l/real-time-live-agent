@@ -9,6 +9,7 @@
 
 /** Control messages the browser sends. Handled one-per-processor server side. */
 export const ClientMessage = {
+  auth: "auth",
   interrupt: "interrupt",
   textInput: "text_input",
   ttsVoice: "tts_voice",
@@ -26,6 +27,7 @@ export type ClientMessageType =
  * application messages on the same socket.
  */
 export const ServerEvent = {
+  authOk: "auth_ok",
   botReady: "bot-ready",
   botStartedSpeaking: "bot-started-speaking",
   botStoppedSpeaking: "bot-stopped-speaking",

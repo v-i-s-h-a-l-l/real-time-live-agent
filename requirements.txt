@@ -1,6 +1,8 @@
 # Render / production requirements — Ministros voice backend
-# Keep this lean: avoid packages that force Rust source builds (pyrnnoise, etc.)
-# RNNoise / resemblyzer are NOT required for the live pipeline.
+# Keep this lean: avoid packages that force Rust source builds.
+# Optional server-side RNNoise (prebuilt wheels for win/linux/mac — no compile):
+#   pyrnnoise>=0.4.3
+# Set RNNOISE_ENABLED=true after installing pyrnnoise. Default is off.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
@@ -13,4 +15,7 @@ loguru>=0.7.3
 numpy<2.0
 scipy>=1.17.1
 torch
+argon2-cffi>=23.1.0
+PyJWT>=2.10.0
+redis>=5.2.0
 pipecat-ai[cartesia,cerebras,deepgram,groq,sarvam,silero,websocket]>=1.1.0

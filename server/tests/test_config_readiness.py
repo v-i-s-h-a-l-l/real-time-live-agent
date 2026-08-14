@@ -55,6 +55,24 @@ def test_local_wildcard_cors_is_silent(monkeypatch):
     assert config.config_warnings() == []
 
 
+def test_production_blockers_fail_closed(monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "FRONTEND_ORIGINS", [])
+    monkeypatch.setattr(config, "SESSION_SECRET", "")
+    monkeypatch.setattr(config, "ALLOW_ANONYMOUS_WS", True)
+    blockers = config.production_blockers()
+    assert "FRONTEND_ORIGIN" in blockers
+    assert "SESSION_SECRET" in blockers
+    assert "ALLOW_ANONYMOUS_WS" in blockers
+
+
+def test_production_wildcard_cors_blocked(monkeypatch):
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "FRONTEND_ORIGINS", ["*"])
+    blockers = config.production_blockers()
+    assert "FRONTEND_ORIGIN" in blockers
+
+
 def test_pipeline_metrics_are_off_in_production(monkeypatch):
     monkeypatch.setattr(config, "ENVIRONMENT", "production")
     assert config.collect_pipeline_metrics() is False

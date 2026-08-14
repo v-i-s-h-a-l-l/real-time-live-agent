@@ -21,6 +21,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from processors.session_context import SessionContextStore
 from protocol import CLIENT_TEXT_INPUT, is_client_message
+from security import clip_text_input
 
 
 def parse_text_input(message: Any) -> tuple[str, str, bool] | None:
@@ -30,6 +31,7 @@ def parse_text_input(message: Any) -> tuple[str, str, bool] | None:
     text = str(message.get("text") or message.get("message") or "").strip()
     if not text:
         return None
+    text = clip_text_input(text)
     message_id = str(message.get("messageId") or message.get("id") or "")
     speak_raw = message.get("speak", True)
     speak = True if speak_raw is None else bool(speak_raw)

@@ -45,6 +45,10 @@ export interface ConnectOptions {
   extraParams?: Record<string, string>;
   /** Curriculum / tutoring context sent immediately after socket open. */
   sessionContext?: JsonObject;
+  /** Mint a short-lived engine token (Next.js /api/voice/session). */
+  getSessionToken?: () => Promise<string | null>;
+  /** Retry the socket after an unexpected drop. Default true. */
+  enableReconnect?: boolean;
 }
 
 export interface VoiceAgentClientEvents {

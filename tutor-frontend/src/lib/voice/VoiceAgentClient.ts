@@ -1,4 +1,4 @@
-import { AUDIO_WORKLET_URL } from "@/lib/config";
+import { AUDIO_WORKLET_URL } from "@/lib/voice";
 import {
   INTERRUPT_DEBOUNCE_MS,
   MIC_HEALTH_CHECK_MS,
@@ -6,6 +6,8 @@ import {
   SAMPLE_RATE_HZ,
   SERVER_BARGE_IN_RESET_MS,
   TRANSCRIPT_DEDUPE_MS,
+  WS_RECONNECT_BASE_MS,
+  WS_RECONNECT_MAX_ATTEMPTS,
 } from "@/lib/voice/constants";
 import {
   ClientMessage,
@@ -113,6 +115,13 @@ export class VoiceAgentClient {
   private pendingLearningContext: JsonObject | null = null;
   private pendingTutorContext: JsonObject | null = null;
   private pendingTtsVoiceId: string = DEFAULT_TUTOR_VOICE_ID;
+  private extraParams: Record<string, string> = {};
+  private pendingVoiceToken: string | null = null;
+  private getSessionToken: (() => Promise<string | null>) | null = null;
+  private enableReconnect = true;
+  private userRequestedDisconnect = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: VoiceAgentClientOptions, events: VoiceAgentClientEvents = {}) {
     this.wsUrl = options.wsUrl;
@@ -149,10 +158,16 @@ export class VoiceAgentClient {
       return;
     }
 
+    this.userRequestedDisconnect = false;
+    this.reconnectAttempt = 0;
+    this.clearReconnectTimer();
     this.connecting = true;
     this.setConnectionState("connecting");
     this.setMicState("requesting");
     this.pendingSessionContext = options.sessionContext ?? null;
+    this.extraParams = { ...(options.extraParams ?? {}) };
+    this.getSessionToken = options.getSessionToken ?? null;
+    this.enableReconnect = options.enableReconnect !== false;
     if (options.extraParams?.voice) {
       this.pendingTtsVoiceId = options.extraParams.voice;
     }
@@ -161,18 +176,85 @@ export class VoiceAgentClient {
     this.closeSocketOnly();
 
     try {
-      await this.startMicrophone();
-      await this.openWebSocket({
-        voice: this.pendingTtsVoiceId,
-        ...(options.extraParams ?? {}),
-      });
+      await this.openAuthenticatedSocket();
     } catch (err) {
       this.connecting = false;
       this.setConnectionState("error");
-      this.setMicState("error");
-      this.emitError(this.mapConnectError(err));
+      const mapped = this.mapConnectError(err);
+      if (this.isMicrophoneError(mapped, err)) {
+        this.setMicState("error");
+      } else {
+        this.setMicState("off");
+      }
+      this.emitError(mapped);
       this.stopAudioGraph();
       this.closeSocketOnly();
+    }
+  }
+
+  private async openAuthenticatedSocket(): Promise<void> {
+    this.assertSecureVoiceUrl();
+    this.pendingVoiceToken = null;
+    if (this.getSessionToken) {
+      const token = await this.getSessionToken();
+      this.pendingVoiceToken = token;
+    }
+    await this.startMicrophone();
+    const safeParams = { ...this.extraParams };
+    delete safeParams.token;
+    await this.openWebSocket({
+      voice: this.pendingTtsVoiceId,
+      ...safeParams,
+    });
+    this.reconnectAttempt = 0;
+  }
+
+  private assertSecureVoiceUrl(): void {
+    if (process.env.NODE_ENV !== "production") return;
+    if (!this.wsUrl.startsWith("wss://")) {
+      throw new Error("Voice WebSocket must use wss:// in production");
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.userRequestedDisconnect || !this.enableReconnect) return;
+    if (this.reconnectAttempt >= WS_RECONNECT_MAX_ATTEMPTS) {
+      this.setConnectionState("error");
+      this.emitError({ message: "Connection lost. Reconnecting…" });
+      return;
+    }
+    const delay = Math.min(
+      WS_RECONNECT_BASE_MS * 2 ** this.reconnectAttempt,
+      8_000,
+    );
+    this.reconnectAttempt += 1;
+    this.setConnectionState("connecting");
+    this.emitError({ message: "Connection lost. Reconnecting…" });
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      void this.reconnectAfterDrop();
+    }, delay);
+  }
+
+  private async reconnectAfterDrop(): Promise<void> {
+    if (this.userRequestedDisconnect) return;
+    this.connecting = true;
+    this.setConnectionState("connecting");
+    try {
+      this.stopAudioGraph();
+      this.closeSocketOnly();
+      await this.openAuthenticatedSocket();
+    } catch (err) {
+      this.connecting = false;
+      this.scheduleReconnect();
+      this.emitError(this.mapConnectError(err));
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
   }
 
@@ -255,6 +337,9 @@ export class VoiceAgentClient {
 
   /** End session and release mic / AudioContext / WebSocket. */
   disconnect(): void {
+    this.userRequestedDisconnect = true;
+    this.enableReconnect = false;
+    this.clearReconnectTimer();
     this.connecting = false;
     this.setConnectionState("disconnecting");
     this.closeSocketOnly();
@@ -276,7 +361,7 @@ export class VoiceAgentClient {
    */
   sendTextInput(text: string, options: { messageId?: string; speak?: boolean } = {}): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
-    const trimmed = text.trim();
+    const trimmed = text.trim().slice(0, 2000);
     if (!trimmed) return false;
     this.suppressPlayback = options.speak === false;
     this.ws.send(
@@ -324,10 +409,45 @@ export class VoiceAgentClient {
     this.setMicState("on");
   }
 
+  /**
+   * Authenticate once per connection via the first text frame.
+   * Never put the ticket in the URL. Never runs per audio frame.
+   */
+  private authenticateSocket(ws: WebSocket): Promise<void> {
+    const token = this.pendingVoiceToken;
+    this.pendingVoiceToken = null;
+    if (!token) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        ws.removeEventListener("message", onMessage);
+        reject(new Error("Voice authentication timed out."));
+      }, 5000);
+      const onMessage = (event: MessageEvent) => {
+        if (typeof event.data !== "string") return;
+        try {
+          const payload = JSON.parse(event.data) as { type?: string };
+          if (payload.type === "auth_ok") {
+            window.clearTimeout(timer);
+            ws.removeEventListener("message", onMessage);
+            resolve();
+          }
+        } catch {
+          // Binary/unrelated frames are ignored until auth_ok.
+        }
+      };
+      ws.addEventListener("message", onMessage);
+      ws.send(JSON.stringify({ type: "auth", token }));
+    });
+  }
+
   private openWebSocket(extraParams: Record<string, string>): Promise<void> {
     return new Promise((resolve, reject) => {
       const base = this.wsUrl.split("?")[0];
-      const params = new URLSearchParams({ lang: this.lang, ...extraParams });
+      const params = new URLSearchParams({ lang: this.lang });
+      for (const [key, value] of Object.entries(extraParams)) {
+        if (key === "token" || !value) continue;
+        params.set(key, value);
+      }
       const url = `${base}?${params.toString()}`;
 
       const ws = new WebSocket(url);
@@ -339,6 +459,7 @@ export class VoiceAgentClient {
       ws.onopen = () => {
         void (async () => {
           try {
+            await this.authenticateSocket(ws);
             this.connecting = false;
             this.connected = true;
             this.setConnectionState("connected");
@@ -360,12 +481,17 @@ export class VoiceAgentClient {
       ws.onclose = () => {
         this.connecting = false;
         this.cleanup(false);
-        this.setConnectionState("idle");
         this.setTurnState("idle");
         if (!settled) {
           settled = true;
           reject(new Error("WebSocket closed before open"));
+          return;
         }
+        if (this.userRequestedDisconnect || !this.enableReconnect) {
+          this.setConnectionState("idle");
+          return;
+        }
+        this.scheduleReconnect();
       };
 
       ws.onerror = () => {
@@ -863,6 +989,24 @@ export class VoiceAgentClient {
 
   private emitError(error: VoiceAgentError): void {
     this.events.onError?.(error);
+  }
+
+  private isMicrophoneError(mapped: VoiceAgentError, err: unknown): boolean {
+    const name =
+      err && typeof err === "object" && "name" in err
+        ? String((err as { name: string }).name)
+        : "";
+    if (
+      name === "NotAllowedError" ||
+      name === "PermissionDeniedError" ||
+      name === "NotFoundError" ||
+      name === "NotReadableError" ||
+      name === "AbortError"
+    ) {
+      return true;
+    }
+    const text = `${mapped.message} ${mapped.code ?? ""}`.toLowerCase();
+    return text.includes("microphone") || text.includes("mic ");
   }
 
   private mapConnectError(err: unknown): VoiceAgentError {

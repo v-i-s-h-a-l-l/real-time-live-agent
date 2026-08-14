@@ -21,6 +21,8 @@ def test_client_message_values_are_the_published_wire_strings():
     assert protocol.CLIENT_SESSION_CONTEXT == "session_context"
     assert protocol.CLIENT_LEARNING_CONTEXT == "learning_context"
     assert protocol.CLIENT_TUTOR_CONTEXT == "tutor_context"
+    assert protocol.CLIENT_AUTH == "auth"
+    assert protocol.SERVER_AUTH_OK == "auth_ok"
     assert protocol.TEXT_INPUT_USER_ID == "text"
 
 

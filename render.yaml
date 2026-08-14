@@ -28,7 +28,21 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: REDIS_URL
+        sync: false
       - key: FRONTEND_ORIGIN
         sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOW_ANONYMOUS_WS
+        value: "0"
+      - key: MAX_CONCURRENT_SESSIONS
+        value: "20"
       - key: HOST
         value: "0.0.0.0"
+      - key: RNNOISE_ENABLED
+        value: "false"

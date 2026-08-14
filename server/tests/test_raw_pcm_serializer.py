@@ -67,6 +67,16 @@ def test_control_message_drops_stale_audio_from_the_previous_turn():
     assert frame.audio == b"\x04" * _TARGET_BYTES
 
 
+def test_oversize_binary_frame_is_dropped():
+    from config import MAX_PCM_ACCUMULATOR_BYTES
+
+    serializer = RawPCMSerializer()
+    assert _deserialize(serializer, b"\x00" * (MAX_PCM_ACCUMULATOR_BYTES + 8)) is None
+    frame = _deserialize(serializer, b"\x05" * _TARGET_BYTES)
+    assert isinstance(frame, InputAudioRawFrame)
+    assert frame.audio == b"\x05" * _TARGET_BYTES
+
+
 def test_malformed_control_frame_is_ignored_rather_than_crashing():
     serializer = RawPCMSerializer()
     assert _deserialize(serializer, "{not json") is None

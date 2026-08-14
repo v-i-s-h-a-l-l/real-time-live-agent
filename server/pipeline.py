@@ -30,7 +30,7 @@ from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 from pipecat.processors.frameworks.rtvi.observer import RTVIObserver
 
 # -- Services
-from pipecat.services.sarvam.stt import SarvamSTTService
+from services.sarvam_stt import ReconnectingSarvamSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 
 # -- Transport
@@ -52,6 +52,7 @@ from config import (
     LANGUAGE_MIN_CHARS,
     LANGUAGE_MIN_CONFIDENCE,
     LANGUAGE_CONFIRMATIONS,
+    RNNOISE_ENABLED,
     collect_pipeline_metrics,
 )
 from languages import (
@@ -154,14 +155,14 @@ async def create_pipeline(
     client_interrupt = ClientInterruptProcessor()
 
     # -- STT (Sarvam saaras:v3 — language="unknown" = continuous auto-detect)
-    stt = SarvamSTTService(
+    stt = ReconnectingSarvamSTTService(
         api_key=SARVAM_API_KEY,
         model="saaras:v3",
         mode="transcribe",
         sample_rate=SAMPLE_RATE,
-        keepalive_timeout=30.0,
+        keepalive_timeout=15.0,
         keepalive_interval=5.0,
-        settings=SarvamSTTService.Settings(
+        settings=ReconnectingSarvamSTTService.Settings(
             language="unknown",
             # Pipecat Silero VAD owns turn boundaries; Sarvam only transcribes + flush.
             vad_signals=False,
@@ -231,7 +232,11 @@ async def create_pipeline(
     llm_empty_guard = LLMEmptyGuardProcessor(timeout_secs=8.0)
 
     audio_gate = AudioGateProcessor(barge_in_rms=0.04, decay_secs=0.35)
-    denoiser = RNNoiseDenoiserProcessor(pipeline_sample_rate=SAMPLE_RATE, enabled=False)
+    denoiser = RNNoiseDenoiserProcessor(
+        pipeline_sample_rate=SAMPLE_RATE,
+        enabled=RNNOISE_ENABLED,
+        session_id=sid,
+    )
 
     silence_detector = SilenceDetectorProcessor(
         silence_threshold_secs=15.0,

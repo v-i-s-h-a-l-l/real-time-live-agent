@@ -4,6 +4,7 @@ import { memo, useMemo } from "react";
 
 import { renderKatex } from "@/lib/markdown/renderKatex";
 import {
+  containsUnsafeHtml,
   parseTutorMarkdown,
   type BlockNode,
   type InlineNode,
@@ -96,6 +97,9 @@ export const TutorMarkdown = memo(function TutorMarkdown({
   const blocks = useMemo(() => parseTutorMarkdown(content), [content]);
   if (!content.trim()) {
     return <p className="tutor-md-pending">Thinking…</p>;
+  }
+  if (containsUnsafeHtml(content)) {
+    return <p className="tutor-md">{content}</p>;
   }
   return (
     <div className="tutor-md">

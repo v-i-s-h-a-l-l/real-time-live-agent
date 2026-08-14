@@ -11,7 +11,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.serializers.base_serializer import FrameSerializer
 
-from config import SAMPLE_RATE
+from config import MAX_PCM_ACCUMULATOR_BYTES, SAMPLE_RATE
 
 _TARGET_BYTES = 1024  # 512 samples × 2 bytes = 1024 bytes for Silero at 16 kHz
 _CHANNELS = 1
@@ -47,7 +47,13 @@ class RawPCMSerializer(FrameSerializer):
 
     async def deserialize(self, data: bytes | str) -> Frame | None:
         if isinstance(data, bytes):
+            if len(data) > MAX_PCM_ACCUMULATOR_BYTES:
+                self._accumulator.clear()
+                return None
             self._accumulator.extend(data)
+            if len(self._accumulator) > MAX_PCM_ACCUMULATOR_BYTES:
+                self._accumulator.clear()
+                return None
             if len(self._accumulator) < _TARGET_BYTES:
                 return None  # not enough yet, wait for more
             chunk = bytes(self._accumulator[:_TARGET_BYTES])

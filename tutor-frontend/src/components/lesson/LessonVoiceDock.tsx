@@ -10,6 +10,7 @@ import type { StudyBreakView } from "@/lib/voice/studyBreak";
 import type { SafetyAlertView } from "@/lib/voice/safetyAlert";
 import { BreakTimer } from "@/components/lesson/BreakTimer";
 import { SafetyConcernBanner } from "@/components/lesson/SafetyConcernBanner";
+import { VoiceConnectionBanner } from "@/components/lesson/VoiceConnectionBanner";
 import { ConversationPanel } from "@/components/conversation/ConversationPanel";
 import { StatusDot, type TutorLiveState } from "@/components/ui/StatusDot";
 import { studentFacingError } from "@/lib/ui/studentFacingError";
@@ -115,6 +116,11 @@ export function LessonVoiceDock({
           </select>
         </label>
       </div>
+
+      <VoiceConnectionBanner
+        connectionState={connectionState}
+        isActive={isActive}
+      />
 
       {errorMessage ? (
         <div className="session-error" role="alert">

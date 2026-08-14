@@ -33,6 +33,16 @@ def test_parse_text_input_defaults_speak_true():
     assert parsed == ("What is this?", "", True)
 
 
+def test_parse_text_input_clips_overlong_messages():
+    from config import TEXT_INPUT_MAX_CHARS
+
+    parsed = parse_text_input(
+        {"type": CLIENT_TEXT_INPUT, "text": "a" * (TEXT_INPUT_MAX_CHARS + 50)}
+    )
+    assert parsed is not None
+    assert len(parsed[0]) == TEXT_INPUT_MAX_CHARS
+
+
 def test_parse_ignores_other_ws_types():
     assert parse_text_input({"type": CLIENT_SESSION_CONTEXT, "text": "nope"}) is None
     assert parse_text_input({"type": CLIENT_TEXT_INPUT, "text": "   "}) is None

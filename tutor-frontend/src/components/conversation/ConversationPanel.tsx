@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   memo,
   useCallback,
@@ -11,7 +12,6 @@ import {
   type KeyboardEvent,
 } from "react";
 
-import { TutorMarkdown } from "@/components/conversation/TutorMarkdown";
 import { IconMic, IconSend } from "@/components/ui/Icons";
 import { BreakStatusChip } from "@/components/lesson/BreakTimer";
 import { SafetyStatusChip } from "@/components/lesson/SafetyConcernBanner";
@@ -28,6 +28,14 @@ const STARTERS = [
   "Why does this work?",
   "Give me a hint",
 ];
+
+const TutorMarkdown = dynamic(
+  () =>
+    import("@/components/conversation/TutorMarkdown").then(
+      (mod) => mod.TutorMarkdown,
+    ),
+  { ssr: false },
+);
 
 // The list must be pinned before the browser paints the new content, or a
 // streaming reply visibly jumps. On the server there is nothing to measure.

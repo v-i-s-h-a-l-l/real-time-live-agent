@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { LessonExperience } from "@/components/lesson/LessonExperience";
 import { chapterPath, subjectPath } from "@/lib/routes";
 import { curriculumService } from "@/services/curriculum/CurriculumService";
+import { toPublicTopic } from "@/domain/curriculum/publicTopic";
 
 export default async function TopicPage({
   params,
@@ -42,7 +43,7 @@ export default async function TopicPage({
         ]}
       />
 
-      <LessonExperience topic={topic} sessionContext={sessionContext} />
+      <LessonExperience topic={toPublicTopic(topic)} sessionContext={sessionContext} />
     </AppShell>
   );
 }

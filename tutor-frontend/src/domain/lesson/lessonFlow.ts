@@ -449,7 +449,7 @@ export function buildStudentVisibleLearningContext(params: {
       questionId: question.id,
       question: question.question,
       difficulty: question.difficulty,
-      hintCount: question.hints.length,
+      hintCount: question.hintCount ?? question.hints.length,
       progressLabel: `Question ${snapshot.questionProgress?.current ?? 0} of ${snapshot.questionProgress?.total ?? 0}`,
     };
   }

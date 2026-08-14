@@ -9,7 +9,6 @@ from loguru import logger
 from pipecat.frames.frames import (
     Frame,
     LLMContextFrame,
-    LLMMessagesAppendFrame,
     LLMRunFrame,
     OutputTransportMessageFrame,
 )
@@ -47,6 +46,7 @@ class TutorTurnProcessor(FrameProcessor):
         # Reads the LanguageTracker's active language (single source of truth),
         # which the upstream tracker has already updated for this turn.
         self._get_language = get_language
+        self._last_turn_key = ""
 
     @property
     def state(self) -> TutorState:
@@ -55,7 +55,7 @@ class TutorTurnProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (LLMContextFrame, LLMMessagesAppendFrame, LLMRunFrame)):
+        if isinstance(frame, (LLMContextFrame, LLMRunFrame)):
             event = self._apply_tutor_turn()
             if event is not None:
                 # State mirror for the UI. Nothing downstream waits on it.
@@ -79,6 +79,18 @@ class TutorTurnProcessor(FrameProcessor):
                 (self._store.learning_context or {}).get("sectionTitle"),
             )
             return None
+
+        turn_key = "|".join(
+            (
+                utterance,
+                self._state.phase,
+                self._state.current_question_id or "",
+                self._state.current_section_id or "",
+            )
+        )
+        if turn_key == self._last_turn_key:
+            return None
+        self._last_turn_key = turn_key
 
         decision = self._engine.decide(
             utterance,

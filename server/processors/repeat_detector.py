@@ -18,6 +18,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+from processors.session_context import upsert_context_system_note
+
 REPEAT_PATTERNS = [
     r"\b(say|repeat|tell me)\s+(that|it|this)\s+again\b",
     r"\bcan\s+you\s+repeat\b",
@@ -85,17 +88,16 @@ class RepeatDetectorProcessor(FrameProcessor):
                 last = _get_last_assistant_message(self._context)
 
                 if last:
-                    hint = {
-                        "role": "system",
-                        "content": (
-                            f"[USER_WANTS_REPEAT] The user is asking you to repeat your last response. "
-                            f"Your last response was: \"{last}\" "
-                            f"Repeat it naturally — same meaning, similar wording. "
-                            f"Do NOT add new information. Do NOT say 'as I said' or 'like I mentioned'. "
-                            f"Just say it again as if you're saying it for the first time, naturally."
-                        ),
-                    }
-                    self._context.add_message(hint)
+                    hint = (
+                        "[USER_WANTS_REPEAT] The user is asking you to repeat your last response. "
+                        f'Your last response was: "{last[:500]}" '
+                        "Repeat it naturally — same meaning, similar wording. "
+                        "Do NOT add new information. Do NOT say 'as I said' or 'like I mentioned'. "
+                        "Just say it again as if you're saying it for the first time, naturally."
+                    )
+                    upsert_context_system_note(
+                        self._context, "[USER_WANTS_REPEAT]", hint
+                    )
 
                     logger.info(
                         "[RepeatDetector] Repeat intent detected — hint injected into context | last_msg='{}'",

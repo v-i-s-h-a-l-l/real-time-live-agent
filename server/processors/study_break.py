@@ -30,6 +30,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from processors.session_context import SessionContextStore
+from security import redact_utterance
 from tutor.breaks import BreakPhase, BreakStore, BreakTurnResult
 
 _LLM_TURN_FRAMES = (LLMContextFrame, LLMRunFrame)
@@ -122,12 +123,12 @@ class StudyBreakProcessor(FrameProcessor):
         self._last_handled = utterance
 
         logger.info(
-            "[StudyBreak] session={} phase={} swallow={} event={} utterance={!r}",
+            "[StudyBreak] session={} phase={} swallow={} event={} utterance={}",
             self._session_id,
             self._store.state.phase.value,
             result.swallow,
             result.event.get("type") if result.event else None,
-            utterance[:80],
+            redact_utterance(utterance),
         )
         await self._deliver(result, force_speak=False)
         if not result.swallow:

@@ -15,6 +15,7 @@ import {
 describe("websocket protocol", () => {
   it("sends the control messages the engine listens for", () => {
     expect(ClientMessage).toEqual({
+      auth: "auth",
       interrupt: "interrupt",
       textInput: "text_input",
       ttsVoice: "tts_voice",
@@ -25,6 +26,7 @@ describe("websocket protocol", () => {
   });
 
   it("names the engine events the tutor UI reacts to", () => {
+    expect(ServerEvent.authOk).toBe("auth_ok");
     expect(ServerEvent.botStartedSpeaking).toBe("bot-started-speaking");
     expect(ServerEvent.botStoppedSpeaking).toBe("bot-stopped-speaking");
     expect(ServerEvent.userTranscription).toBe("user-transcription");

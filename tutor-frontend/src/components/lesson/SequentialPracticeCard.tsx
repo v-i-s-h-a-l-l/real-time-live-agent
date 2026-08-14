@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 
 import type { PracticeQuestion } from "@/domain/curriculum/types";
+import { practiceHintCount } from "@/domain/curriculum/publicTopic";
 import {
   describeMastery,
   describeProgress,
@@ -46,10 +47,17 @@ export function SequentialPracticeCard({
   const [localEvaluation, setLocalEvaluation] =
     useState<AnswerEvaluation | null>(null);
   const [hintIndex, setHintIndex] = useState(-1);
+  const [fetchedHints, setFetchedHints] = useState<string[]>([]);
   const [showSolution, setShowSolution] = useState(false);
+  const [solutionSteps, setSolutionSteps] = useState<string[]>([]);
+  const [expectedAnswer, setExpectedAnswer] = useState(question.expectedAnswer);
+  const [busy, setBusy] = useState(false);
 
-  // The tutor is authoritative once it has scored this question; the local
-  // evaluator (same rules) covers the moment before the reply lands.
+  const hintCount = practiceHintCount(question);
+  const voiceGuarded = Boolean(onSubmitAnswer);
+  const canRevealSolution =
+    !voiceGuarded || Boolean(progress?.revealSolution);
+
   const tutorEvaluation =
     progress && progress.questionId === question.id ? progress.evaluation : null;
   const evaluation = tutorEvaluation ?? localEvaluation;
@@ -58,19 +66,91 @@ export function SequentialPracticeCard({
 
   const topicProgress = progress ? describeProgress(progress) : null;
   const mastery = progress ? describeMastery(progress) : null;
+  const visibleHints =
+    question.hints.length > 0 ? question.hints : fetchedHints;
 
   function markAttempted(): void {
     onAttempted(true);
   }
 
-  function onSubmit(event: FormEvent): void {
+  async function resolveEvaluation(value: string): Promise<AnswerEvaluation> {
+    if (question.expectedAnswer) {
+      return evaluateAnswer(
+        value,
+        question.expectedAnswer,
+        question.acceptedAnswers ?? [],
+      ).evaluation;
+    }
+    const response = await fetch("/api/practice/evaluate", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId: question.id, answer: value }),
+    });
+    if (!response.ok) return "ambiguous";
+    const data = (await response.json()) as { evaluation?: AnswerEvaluation };
+    return data.evaluation ?? "ambiguous";
+  }
+
+  async function onSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (!answer.trim()) return;
-    setLocalEvaluation(
-      evaluateAnswer(answer, question.expectedAnswer, question.acceptedAnswers ?? [])
-        .evaluation,
-    );
-    onSubmitAnswer?.(answer);
+    if (!answer.trim() || busy) return;
+    setBusy(true);
+    try {
+      setLocalEvaluation(await resolveEvaluation(answer));
+      onSubmitAnswer?.(answer);
+      markAttempted();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onHint(): Promise<void> {
+    const next = Math.min(hintIndex + 1, Math.max(hintCount - 1, 0));
+    if (question.hints.length === 0 && fetchedHints[next] == null) {
+      const response = await fetch("/api/practice/hint", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId: question.id, index: next }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { hint?: string };
+        if (data.hint) {
+          setFetchedHints((prev) => {
+            const copy = prev.slice();
+            copy[next] = data.hint as string;
+            return copy;
+          });
+        }
+      }
+    }
+    setHintIndex(next);
+    markAttempted();
+  }
+
+  async function onReveal(): Promise<void> {
+    if (!canRevealSolution) return;
+    if (!question.expectedAnswer || question.solution.length === 0) {
+      const response = await fetch("/api/practice/solution", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ questionId: question.id }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as {
+          solution?: string[];
+          expectedAnswer?: string;
+        };
+        setSolutionSteps(data.solution ?? []);
+        setExpectedAnswer(data.expectedAnswer ?? "");
+      }
+    } else {
+      setSolutionSteps(question.solution);
+      setExpectedAnswer(question.expectedAnswer);
+    }
+    setShowSolution(true);
     markAttempted();
   }
 
@@ -92,7 +172,7 @@ export function SequentialPracticeCard({
 
       <h2 className="lesson-unit-title">{question.question}</h2>
 
-      <form className="practice-form" onSubmit={onSubmit}>
+      <form className="practice-form" onSubmit={(event) => void onSubmit(event)}>
         <label className="practice-label" htmlFor={`lesson-answer-${question.id}`}>
           Your answer
         </label>
@@ -108,32 +188,26 @@ export function SequentialPracticeCard({
           placeholder="Type your answer…"
         />
         <div className="practice-actions">
-          <button type="submit" className="btn btn-primary">
+          <button type="submit" className="btn btn-primary" disabled={busy}>
             Submit
           </button>
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => {
-              setHintIndex((prev) =>
-                Math.min(prev + 1, question.hints.length - 1),
-              );
-              markAttempted();
-            }}
-            disabled={hintIndex >= question.hints.length - 1 && hintIndex >= 0}
+            onClick={() => void onHint()}
+            disabled={hintCount <= 0 || (hintIndex >= hintCount - 1 && hintIndex >= 0)}
           >
             {hintIndex < 0 ? "Show hint" : "Next hint"}
           </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => {
-              setShowSolution(true);
-              markAttempted();
-            }}
-          >
-            Show solution
-          </button>
+          {canRevealSolution ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => void onReveal()}
+            >
+              Show solution
+            </button>
+          ) : null}
         </div>
       </form>
 
@@ -150,7 +224,7 @@ export function SequentialPracticeCard({
         <div className="practice-hints">
           <h3>Hints</h3>
           <ol>
-            {question.hints.slice(0, hintIndex + 1).map((hint) => (
+            {visibleHints.slice(0, hintIndex + 1).map((hint) => (
               <li key={hint}>{hint}</li>
             ))}
           </ol>
@@ -161,13 +235,17 @@ export function SequentialPracticeCard({
         <div className="practice-solution">
           <h3>Solution</h3>
           <ol>
-            {question.solution.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
+            {(solutionSteps.length > 0 ? solutionSteps : question.solution).map(
+              (step) => (
+                <li key={step}>{step}</li>
+              ),
+            )}
           </ol>
-          <p>
-            <strong>Expected answer:</strong> {question.expectedAnswer}
-          </p>
+          {expectedAnswer ? (
+            <p>
+              <strong>Expected answer:</strong> {expectedAnswer}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </article>

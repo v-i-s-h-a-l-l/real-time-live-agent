@@ -19,6 +19,11 @@ from protocol import (
     CLIENT_TUTOR_CONTEXT,
     is_client_message,
 )
+from security import (
+    sanitize_client_dict,
+    tutor_context_signature_required,
+    verify_tutor_context,
+)
 
 _SESSION_MARKER = "[SESSION_CONTEXT]"
 _LEARNING_MARKER = "[LEARNING_CONTEXT]"
@@ -101,7 +106,7 @@ def _learning_note(context: dict[str, Any]) -> str:
             lines.append(f"- Section type: {section_type}")
         visible = (context.get("visibleContent") or "").strip()
         if visible:
-            lines.append(f"- Visible content: {visible}")
+            lines.append(f"- Visible content: {visible[:800]}")
         key_points = context.get("keyPoints") or []
         if isinstance(key_points, list) and key_points:
             lines.append(
@@ -212,8 +217,9 @@ class SessionContextProcessor(FrameProcessor):
                     )
                     return
 
-                self._store.set_context(raw)
-                note = _system_note(raw)
+                cleaned = sanitize_client_dict(raw)
+                self._store.set_context(cleaned)
+                note = _system_note(cleaned)
                 upsert_context_system_note(self._llm_context, _SESSION_MARKER, note)
                 self._store.applied = True
                 logger.info(
@@ -235,18 +241,20 @@ class SessionContextProcessor(FrameProcessor):
                     return
 
                 # Refuse accidental solution leakage from the student-visible payload.
-                sanitized = {
-                    key: value
-                    for key, value in raw.items()
-                    if key
-                    not in {
-                        "solution",
-                        "expectedAnswer",
-                        "acceptedAnswers",
-                        "hints",
-                        "tutorOnly",
+                sanitized = sanitize_client_dict(
+                    {
+                        key: value
+                        for key, value in raw.items()
+                        if key
+                        not in {
+                            "solution",
+                            "expectedAnswer",
+                            "acceptedAnswers",
+                            "hints",
+                            "tutorOnly",
+                        }
                     }
-                }
+                )
                 self._store.set_learning_context(sanitized)
                 note = _learning_note(sanitized)
                 upsert_context_system_note(self._llm_context, _LEARNING_MARKER, note)
@@ -270,8 +278,21 @@ class SessionContextProcessor(FrameProcessor):
                         self._session_id,
                     )
                     return
+                trusted = verify_tutor_context(raw)
+                if trusted is None:
+                    logger.warning(
+                        "[TutorContext] rejected unsigned or invalid payload | session={}",
+                        self._session_id,
+                    )
+                    if tutor_context_signature_required():
+                        return
+                    trusted = sanitize_client_dict(
+                        {key: value for key, value in raw.items() if key != "sig"}
+                    )
+                else:
+                    trusted = sanitize_client_dict(trusted)
                 # Tutor-only store — never inject solutions into a permanent system note.
-                self._store.set_tutor_context(raw)
+                self._store.set_tutor_context(trusted)
                 logger.info(
                     "[TutorContext] stored | session={} question={}",
                     self._session_id,

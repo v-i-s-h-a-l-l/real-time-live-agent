@@ -11,8 +11,14 @@ describe("studentFacingError", () => {
       "microphone",
     );
     expect(studentFacingError("boom")).toBe("Something went wrong. Try again.");
-    expect(studentFacingError("Start voice to send a message.")).toBe(
-      "Start voice to send a message.",
+    expect(studentFacingError("Could not start a secure session.")).toBe(
+      "Could not start a secure session.",
+    );
+    expect(studentFacingError("unauthorized 4401")).toBe(
+      "Could not start a secure session.",
+    );
+    expect(studentFacingError("Please sign in to start a voice session.")).toBe(
+      "Please sign in to start a voice session.",
     );
   });
 });

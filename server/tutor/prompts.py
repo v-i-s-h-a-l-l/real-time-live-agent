@@ -12,6 +12,7 @@ from languages import (
     display_name,
     normalize_session_lang,
 )
+from security import sanitize_client_text
 from tutor.faq import FAQ_KNOWLEDGE_MARKER
 from tutor.practice import (
     AnswerEvaluation,
@@ -376,11 +377,13 @@ def build_tutor_turn_directive(
                     + " | ".join(str(s) for s in solution[:6])
                 )
         elif decision.mode in {TeachingMode.EVALUATE, TeachingMode.CORRECT, TeachingMode.SOCRATIC}:
-            expected = tutor_context.get("expectedAnswer")
-            if expected:
-                lines.append(
-                    f"- Tutor-only expected answer (do not reveal unless student insists): {expected}"
-                )
+            # Keep the answer out of the prompt. The deterministic evaluator
+            # already judged the attempt; leaking the key here is how models
+            # "helpfully" reveal it when the student insists.
+            lines.append(
+                "- Tutor-only expected answer is withheld this turn. Use the "
+                "evaluation verdict and hint ladder only. Do not invent or speak the key."
+            )
 
     if decision.check_understanding:
         lines.append("- End with one tiny check-for-understanding question if it fits naturally.")
@@ -412,8 +415,8 @@ def build_tutor_turn_directive(
             else:
                 lines.append(f"- Note: {note}")
 
-    snippet = (utterance or "").strip()
+    snippet = sanitize_client_text(utterance, limit=300)
     if snippet:
-        lines.append(f"- Latest student utterance: {snippet[:300]}")
+        lines.append(f"- Latest student utterance: {snippet}")
 
     return "\n".join(lines)

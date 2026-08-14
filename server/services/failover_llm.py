@@ -24,6 +24,8 @@ from loguru import logger
 from pipecat.services.cerebras.llm import CerebrasLLMService
 from pipecat.services.settings import assert_given
 
+from ops_log import ops_event
+
 
 def _fail_fast(client):
     """Drop the SDK's own retry/backoff so failover happens on the first refusal."""
@@ -40,6 +42,13 @@ class FallbackProvider(TypedDict):
     api_key: str
     base_url: str
     model: str
+
+
+def _llm_failure_category(err: Exception) -> str:
+    text = str(err).lower()
+    if "429" in text or "rate" in text or "quota" in text or "queue_exceeded" in text:
+        return "rate_limit"
+    return "provider_error"
 
 
 class FailoverLLMService(CerebrasLLMService):
@@ -121,6 +130,16 @@ class FailoverLLMService(CerebrasLLMService):
             return await self._client.chat.completions.create(**params)
         except Exception as primary_err:
             last_err = primary_err
+            category = _llm_failure_category(primary_err)
+            if category == "rate_limit":
+                ops_event("cerebras_429", category="llm", provider="Cerebras")
+            ops_event(
+                "llm_request_failure",
+                category="llm",
+                provider="Cerebras",
+                failure=category,
+                error_type=type(primary_err).__name__,
+            )
             logger.warning(
                 "[FailoverLLM] primary (Cerebras) failed: {} — trying fallbacks",
                 primary_err,
@@ -131,12 +150,24 @@ class FailoverLLMService(CerebrasLLMService):
             try:
                 fb_params = dict(params)
                 fb_params["model"] = fb["model"]
+                ops_event(
+                    "groq_failover" if fb["name"] == "Groq" else "llm_failover_attempt",
+                    category="llm",
+                    provider=fb["name"],
+                )
                 logger.info(
                     "[FailoverLLM] retrying on fallback: {} ({})", fb["name"], fb["model"]
                 )
                 return await fb["client"].chat.completions.create(**fb_params)
             except Exception as fb_err:
                 last_err = fb_err
+                ops_event(
+                    "llm_request_failure",
+                    category="llm",
+                    provider=fb["name"],
+                    failure=_llm_failure_category(fb_err),
+                    error_type=type(fb_err).__name__,
+                )
                 logger.warning(
                     "[FailoverLLM] fallback {} failed: {}", fb["name"], fb_err
                 )

@@ -182,10 +182,7 @@ class LLMEmptyGuardProcessor(FrameProcessor):
             self._has_text = True
             self._consecutive_empties = 0  # reset streak
             self._cancel_timeout()  # Got text — no need for timeout
-            if not self._timeout_fired:
-                await self.push_frame(frame, direction)
-            # If timeout already fired, silently drop late-arriving text
-            # to avoid double-speaking
+            await self.push_frame(frame, direction)
 
         elif isinstance(frame, LLMFullResponseEndFrame):
             self._cancel_timeout()

@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 from opening import opening_system_message  # noqa: E402
 from processors.session_context import SessionContextStore  # noqa: E402
 
-_MATCH = "After they speak, always match their language (English, Hindi, or Tamil)."
+_MATCH = "After they speak, always match their language (English, Hindi, Tamil, or Telugu)."
 
 
 def test_generic_greeting_when_no_curriculum_has_arrived():

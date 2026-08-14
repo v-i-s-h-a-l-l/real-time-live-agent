@@ -10,7 +10,7 @@ from __future__ import annotations
 from processors.session_context import SessionContextStore
 
 _MATCH_LANGUAGE = (
-    "After they speak, always match their language (English, Hindi, or Tamil)."
+    "After they speak, always match their language (English, Hindi, Tamil, or Telugu)."
 )
 
 

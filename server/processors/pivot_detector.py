@@ -71,6 +71,12 @@ _PIVOT_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Lone hesitation is not a topic pivot — students say "wait" while thinking.
+_LONE_HESITATION = re.compile(
+    r"^(wait|hold on|ruko|ek (sec|second|minute)|one sec)[\s,.!?]*$",
+    re.IGNORECASE,
+)
+
 # Stop words for semantic overlap calculation (English + Hindi)
 _STOP_WORDS: frozenset[str] = frozenset({
     # English
@@ -245,8 +251,11 @@ class PivotDetectorProcessor(FrameProcessor):
     # ── Pivot detection logic ────────────────────────────────────────────────
 
     def _pattern_pivot(self, text: str) -> bool:
-        """True if any strong redirect phrase is found in the text."""
-        return bool(_PIVOT_RE.search(text))
+        """True if a strong redirect phrase is found — not a lone hesitation."""
+        stripped = text.strip()
+        if not stripped or _LONE_HESITATION.match(stripped):
+            return False
+        return bool(_PIVOT_RE.search(stripped))
 
     def _semantic_pivot(self, new_text: str) -> bool:
         """

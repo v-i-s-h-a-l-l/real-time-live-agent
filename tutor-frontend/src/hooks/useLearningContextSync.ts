@@ -5,10 +5,8 @@ import { useEffect, useRef } from "react";
 import type { Topic, TutorSessionContext } from "@/domain/curriculum/types";
 import {
   buildStudentVisibleLearningContext,
-  buildTutorOnlyLearningContext,
   learningContextFingerprint,
   toLearningContextPayload,
-  toTutorContextPayload,
   type LessonSnapshot,
 } from "@/domain/lesson/lessonFlow";
 import type { JsonObject } from "@/lib/voice/types";
@@ -19,6 +17,9 @@ import type { JsonObject } from "@/lib/voice/types";
  * Two effects on purpose: one follows slide/question changes while the
  * socket is open; the other fires once when the socket becomes ready so
  * the first slide is not dropped during connect.
+ *
+ * Tutor-only answers are fetched from the Next.js server and HMAC-signed;
+ * they are never read from the client lesson bundle.
  */
 export function useLearningContextSync({
   topic,
@@ -40,14 +41,19 @@ export function useLearningContextSync({
   const onTutorRef = useRef(onTutorContext);
   onLearningRef.current = onLearningContext;
   onTutorRef.current = onTutorContext;
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  const topicRef = useRef(topic);
+  topicRef.current = topic;
+  const sessionRef = useRef(sessionContext);
+  sessionRef.current = sessionContext;
 
-  const pushContexts = () => {
+  const pushContexts = (active: LessonSnapshot) => {
     const visible = buildStudentVisibleLearningContext({
-      session: sessionContext,
-      topic,
-      snapshot,
+      session: sessionRef.current,
+      topic: topicRef.current,
+      snapshot: active,
     });
-    const tutorOnly = buildTutorOnlyLearningContext({ topic, snapshot });
     if (process.env.NODE_ENV !== "production") {
       console.info("[ACTIVE_LEARNING_CONTEXT_UPDATED]", {
         topicId: visible.topicId,
@@ -58,7 +64,26 @@ export function useLearningContextSync({
       });
     }
     onLearningRef.current(toLearningContextPayload(visible));
-    onTutorRef.current(toTutorContextPayload(tutorOnly));
+
+    void fetch("/api/tutor-context", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topicId: topicRef.current.id,
+        phase: active.state.phase,
+        questionId: active.currentQuestion?.id ?? "",
+      }),
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { context?: JsonObject } | null) => {
+        if (data?.context && typeof data.context === "object") {
+          onTutorRef.current(data.context);
+        }
+      })
+      .catch(() => {
+        // Visible learning context is enough for tutoring to continue.
+      });
   };
 
   useEffect(() => {
@@ -72,10 +97,8 @@ export function useLearningContextSync({
     lastFingerprint.current = fingerprint;
 
     if (voiceReady) {
-      pushContexts();
+      pushContexts(snapshot);
     }
-    // pushContexts closes over the latest snapshot via this effect's deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, sessionContext, topic, voiceReady]);
 
   useEffect(() => {
@@ -89,8 +112,6 @@ export function useLearningContextSync({
       snapshot,
     });
     lastFingerprint.current = learningContextFingerprint(visible);
-    pushContexts();
-    // First push after the socket opens; snapshot is read at that moment.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    pushContexts(snapshot);
   }, [voiceReady]);
 }

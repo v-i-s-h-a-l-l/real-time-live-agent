@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toVoiceSessionPayload } from "@/domain/curriculum/sessionContext";
 import type { TutorSessionContext } from "@/domain/curriculum/types";
-import { VOICE_DEFAULT_LANG, VOICE_WS_URL } from "@/lib/config";
+import { VOICE_DEFAULT_LANG, VOICE_WS_URL } from "@/lib/voice";
 import { VoiceAgentClient } from "@/lib/voice/VoiceAgentClient";
+import { mintVoiceToken } from "@/lib/voice/sessionToken";
 import {
   emptyTranscript,
   reduceTranscript,
@@ -213,6 +214,8 @@ export function useVoiceSession(): UseVoiceSessionResult {
           ? toVoiceSessionPayload(tutorContext)
           : undefined,
         extraParams: { voice: voiceId || DEFAULT_TUTOR_VOICE_ID },
+        getSessionToken: mintVoiceToken,
+        enableReconnect: true,
       });
     },
     [],
