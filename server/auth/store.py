@@ -94,6 +94,11 @@ class AuthStore:
             )
 
     def create_user(self, *, email: str, password_hash: str) -> UserRecord | None:
+        """Create the account, or reset the password if that email already exists.
+
+        Re-signup is how a locked-out student reclaims the same email (no mail
+        verification / reset flow). Old refresh sessions are revoked.
+        """
         user_id = str(uuid.uuid4())
         now = time.time()
         with self._lock, self._connect() as conn:
@@ -104,7 +109,22 @@ class AuthStore:
                     (user_id, email, password_hash, now),
                 )
             except sqlite3.IntegrityError:
-                return None
+                row = conn.execute(
+                    "SELECT id FROM users WHERE email = ?",
+                    (email,),
+                ).fetchone()
+                if row is None:
+                    return None
+                user_id = str(row["id"])
+                conn.execute(
+                    "UPDATE users SET password_hash = ?, is_active = 1 WHERE id = ?",
+                    (password_hash, user_id),
+                )
+                conn.execute(
+                    "UPDATE refresh_sessions SET revoked_at = ? "
+                    "WHERE user_id = ? AND revoked_at IS NULL",
+                    (now, user_id),
+                )
         return UserRecord(id=user_id, email=email, password_hash=password_hash, is_active=True)
 
     def get_user_by_email(self, email: str) -> UserRecord | None:

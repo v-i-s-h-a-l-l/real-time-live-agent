@@ -88,7 +88,8 @@ def test_signup_signin_me_and_signout(tmp_path, monkeypatch):
         "/auth/signup",
         json={"email": "ada@school.in", "password": STRONG},
     )
-    assert duplicate.status_code == 400
+    assert duplicate.status_code == 200
+    assert duplicate.json()["access_token"]
 
     denied = client.post(
         "/auth/signin",
@@ -122,6 +123,38 @@ def test_signup_signin_me_and_signout(tmp_path, monkeypatch):
     )
     reused = client.post("/auth/refresh", json={"refresh_token": refresh})
     assert reused.status_code == 401
+
+
+def test_signup_same_email_resets_password(tmp_path, monkeypatch):
+    client = _client(monkeypatch, tmp_path)
+    first = client.post(
+        "/auth/signup",
+        json={"email": "same@school.in", "password": STRONG},
+    )
+    assert first.status_code == 200
+    user_id = verify_access_token(first.json()["access_token"])["sub"]
+    old_refresh = first.json()["refresh_token"]
+
+    new_password = "NewPass123!"
+    again = client.post(
+        "/auth/signup",
+        json={"email": "same@school.in", "password": new_password},
+    )
+    assert again.status_code == 200
+    new_claims = verify_access_token(again.json()["access_token"])
+    assert new_claims is not None
+    assert new_claims["sub"] == user_id
+
+    assert client.post(
+        "/auth/signin",
+        json={"email": "same@school.in", "password": STRONG},
+    ).status_code == 401
+    ok = client.post(
+        "/auth/signin",
+        json={"email": "same@school.in", "password": new_password},
+    )
+    assert ok.status_code == 200
+    assert client.post("/auth/refresh", json={"refresh_token": old_refresh}).status_code == 401
 
 
 def test_signup_rejects_weak_passwords(tmp_path, monkeypatch):
