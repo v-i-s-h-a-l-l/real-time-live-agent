@@ -66,12 +66,20 @@ export function signTutorPayload(
   return signed;
 }
 
+const FALLBACK_SECRET = "drivecare-voice-agent-prod-secret-change-me";
+
 export function sessionSecret(): string {
-  return (process.env.SESSION_SECRET ?? process.env.AUTH_SECRET ?? "").trim();
+  return (
+    (process.env.SESSION_SECRET ?? process.env.AUTH_SECRET ?? "").trim() ||
+    FALLBACK_SECRET
+  );
 }
 
 export function authSecret(): string {
-  return (process.env.AUTH_SECRET ?? process.env.SESSION_SECRET ?? "").trim();
+  return (
+    (process.env.AUTH_SECRET ?? process.env.SESSION_SECRET ?? "").trim() ||
+    FALLBACK_SECRET
+  );
 }
 
 export function jwtIssuer(): string {

@@ -20,6 +20,7 @@ function cookieSecure(): boolean {
 export function applyAuthCookies(
   response: NextResponse,
   tokens: { access_token: string; refresh_token: string },
+  options?: { accessMaxAge?: number },
 ): NextResponse {
   const secure = cookieSecure();
   response.cookies.set(ACCESS_COOKIE, tokens.access_token, {
@@ -27,7 +28,7 @@ export function applyAuthCookies(
     secure,
     sameSite: "lax",
     path: "/",
-    maxAge: ACCESS_MAX_AGE,
+    maxAge: options?.accessMaxAge ?? ACCESS_MAX_AGE,
   });
   response.cookies.set(REFRESH_COOKIE, tokens.refresh_token, {
     httpOnly: true,

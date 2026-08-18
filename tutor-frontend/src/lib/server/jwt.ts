@@ -16,6 +16,32 @@ function b64urlJson(part: string): unknown {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 }
 
+export function mintAccessJwt(
+  userId: string,
+  secret: string,
+  ttlSecs: number,
+): string {
+  const issued = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: userId,
+      iss: jwtIssuer(),
+      aud: jwtAudience(),
+      iat: issued,
+      exp: issued + ttlSecs,
+      jti: crypto.randomUUID().replaceAll("-", ""),
+      typ: "access",
+    }),
+  ).toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
 export function verifyAccessJwt(
   token: string,
   secret: string,

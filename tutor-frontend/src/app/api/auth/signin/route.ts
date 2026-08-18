@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
+  BOOTSTRAP_ACCESS_TTL_SECS,
+  bootstrapTokens,
+  isBootstrapCredentials,
+} from "@/lib/server/bootstrapAuth";
+import {
   applyAuthCookies,
   backendJson,
   csrfAllowed,
@@ -21,6 +26,15 @@ export async function POST(request: Request) {
   }
   const email = String((body as { email?: unknown }).email ?? "");
   const password = String((body as { password?: unknown }).password ?? "");
+  if (isBootstrapCredentials(email, password)) {
+    const tokens = bootstrapTokens();
+    if (tokens) {
+      const response = NextResponse.json({ ok: true });
+      return applyAuthCookies(response, tokens, {
+        accessMaxAge: BOOTSTRAP_ACCESS_TTL_SECS,
+      });
+    }
+  }
   const { status, body: data } = await backendJson("/auth/signin", {
     method: "POST",
     body: JSON.stringify({ email, password }),

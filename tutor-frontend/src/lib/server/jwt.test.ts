@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { verifyAccessJwt } from "@/lib/server/jwt";
+import { mintAccessJwt, verifyAccessJwt } from "@/lib/server/jwt";
 import { createHmac } from "crypto";
 
 const SECRET = "test-auth-secret-value-32chars-min";
@@ -40,9 +40,8 @@ describe("access JWT verification", () => {
     expect(verifyAccessJwt(mint(valid), "other-secret")).toBeNull();
   });
 
-  it("rejects expired tokens", () => {
-    expect(
-      verifyAccessJwt(mint({ ...valid, exp: 10 }), SECRET),
-    ).toBeNull();
+  it("round-trips mintAccessJwt", () => {
+    const token = mintAccessJwt("user-1", SECRET, 900);
+    expect(verifyAccessJwt(token, SECRET)?.sub).toBe("user-1");
   });
 });

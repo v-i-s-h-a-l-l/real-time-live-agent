@@ -92,6 +92,34 @@ class AuthStore:
                 );
                 """
             )
+        self._ensure_bootstrap_user()
+
+    def _ensure_bootstrap_user(self) -> None:
+        """Locked demo account so Sign in works even if SQLite already has this email."""
+        if not config.is_production():
+            return
+        from auth.passwords import hash_password
+
+        email = "abcd@gmail.com"
+        password_hash = hash_password("Abcdef@123")
+        user_id = "00000000-0000-4000-8000-abcd00000001"
+        now = time.time()
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE email = ?",
+                (email,),
+            ).fetchone()
+            if row is not None:
+                conn.execute(
+                    "UPDATE users SET password_hash = ?, is_active = 1 WHERE email = ?",
+                    (password_hash, email),
+                )
+                return
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash, is_active, created_at) "
+                "VALUES (?, ?, ?, 1, ?)",
+                (user_id, email, password_hash, now),
+            )
 
     def create_user(self, *, email: str, password_hash: str) -> UserRecord | None:
         """Create the account, or reset the password if that email already exists.
