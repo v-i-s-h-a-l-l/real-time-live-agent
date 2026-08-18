@@ -207,7 +207,7 @@ def test_boredom_does_not_socratic_the_same_question():
     assert d.allow_reveal_answer is True
     assert d.check_understanding is False
     assert d.use_next_hint is False
-    assert "overlooking" not in d.strategy.lower()
+    assert "never use textbook" in d.strategy.lower()
     assert "same question" in d.strategy.lower()
     assert state.depth_preference == "short"
     skip = engine.decide("I don't want to do this", TutorState(phase="practice"))
