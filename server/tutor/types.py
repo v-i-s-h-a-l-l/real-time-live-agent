@@ -24,6 +24,7 @@ class StudentIntent(str, Enum):
     DEPTH_MORE = "depth_more"
     DEPTH_SHORT = "depth_short"
     DEPTH_SIMPLER = "depth_simpler"
+    DISENGAGEMENT = "disengagement"
     RELATED_EDUCATIONAL = "related_educational"
     TOPIC_CHANGE = "topic_change"
     UNRELATED = "unrelated"

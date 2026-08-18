@@ -197,6 +197,24 @@ def test_success_is_brief():
     assert d.check_understanding is False
 
 
+def test_boredom_does_not_socratic_the_same_question():
+    engine = TutorEngine()
+    state = TutorState(phase="practice", current_question_id="q1")
+    d = engine.decide("This is very boring.", state)
+    assert d.intent == StudentIntent.DISENGAGEMENT
+    assert d.mode == TeachingMode.LEARN
+    assert d.move.value == "shorten"
+    assert d.allow_reveal_answer is True
+    assert d.check_understanding is False
+    assert d.use_next_hint is False
+    assert "overlooking" not in d.strategy.lower()
+    assert "same question" in d.strategy.lower()
+    assert state.depth_preference == "short"
+    skip = engine.decide("I don't want to do this", TutorState(phase="practice"))
+    assert skip.intent == StudentIntent.DISENGAGEMENT
+    assert "do not insist" in skip.strategy.lower() or "leave this problem" in skip.strategy.lower()
+
+
 def test_ack_directive_forbids_follow_up_and_sets_length():
     engine = TutorEngine()
     state = TutorState(phase="learning", topic_title="Discriminant")

@@ -49,6 +49,11 @@ SUITE: list[tuple[str, str, StudentIntent, TeachingMode, ConversationMove, Respo
     ("Explain more.", "learning", StudentIntent.DEPTH_MORE, TeachingMode.LEARN, ConversationMove.DEEPEN, ResponseLength.MEDIUM),
     ("Keep it short.", "learning", StudentIntent.DEPTH_SHORT, TeachingMode.ACKNOWLEDGE, ConversationMove.SHORTEN, ResponseLength.MICRO),
     ("Give me a simpler example.", "learning", StudentIntent.DEPTH_SIMPLER, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
+    ("This is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("This problem is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("I don't want to do this", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("This is too tedious", "learning", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("I'm bored", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
 ]
 
 

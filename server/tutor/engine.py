@@ -192,7 +192,7 @@ class TutorEngine:
 
         if decision.intent == StudentIntent.DEPTH_MORE:
             state.depth_preference = "deep"
-        elif decision.intent == StudentIntent.DEPTH_SHORT:
+        elif decision.intent in (StudentIntent.DEPTH_SHORT, StudentIntent.DISENGAGEMENT):
             state.depth_preference = "short"
         elif decision.intent == StudentIntent.DEPTH_SIMPLER:
             state.depth_preference = "beginner"

@@ -150,6 +150,30 @@ _DEPTH_SIMPLER = re.compile(
     re.I,
 )
 
+# Bored / frustrated / done with this step — not a wrong answer, not off-topic.
+_DISENGAGEMENT = re.compile(
+    r"("
+    r"\b(bor(?:ed|ing)|tedious|annoying|frustrating|frustrated)\b|"
+    r"\bi(?:'?m| am) (?:so )?(?:bored|tired of this)\b|"
+    r"\bthis (?:problem |question |step )?(?:is )?(?:so |very |too )?"
+    r"(?:boring|tedious|annoying|frustrating|dull)\b|"
+    r"\b(?:don'?t|do not) (?:want|wanna) to (?:do|continue|keep doing) (?:this|it)\b|"
+    r"\b(?:not interested|i hate this|tired of this|had enough)\b|"
+    r"\b(?:let'?s skip|skip (?:this|it)|move on)\b|"
+    r"बोर|ऊब|मन नहीं लग|"
+    r"சலிப்பு"
+    r")",
+    re.I,
+)
+
+_MOVE_ON = re.compile(
+    r"("
+    r"\b(?:skip (?:this|it)|let'?s skip|move on|enough (?:of this|for now))\b|"
+    r"\b(?:don'?t|do not) (?:want|wanna) to (?:do|continue|keep doing) (?:this|it)\b"
+    r")",
+    re.I,
+)
+
 _ACK = re.compile(
     r"^\s*(ok(ay)?|yeah|yes|yep|right|exactly|thanks|thank you|"
     r"cool|alright|theek|ठीक|சரி|ஆமா)\s*[.!?]?\s*$",
@@ -233,6 +257,8 @@ def detect_intent(utterance: str, *, phase: str = "learning") -> StudentIntent:
         return StudentIntent.SUCCESS
     if _HESITATION.match(text):
         return StudentIntent.HESITATION
+    if _DISENGAGEMENT.search(text):
+        return StudentIntent.DISENGAGEMENT
     if _DEPTH_MORE.search(text):
         return StudentIntent.DEPTH_MORE
     if _DEPTH_SHORT.search(text):
@@ -299,3 +325,8 @@ def is_interrupt_style(utterance: str) -> bool:
     if not _INTERRUPT_STYLE.search(text):
         return False
     return not _HESITATION.match(text)
+
+
+def is_move_on_request(utterance: str) -> bool:
+    """True when they want to leave the current problem, not just hear it faster."""
+    return bool(_MOVE_ON.search(utterance or ""))

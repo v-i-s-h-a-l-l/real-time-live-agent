@@ -68,6 +68,7 @@ _ON_TOPIC_UNLOCK = {
     StudentIntent.DEPTH_MORE,
     StudentIntent.DEPTH_SHORT,
     StudentIntent.DEPTH_SIMPLER,
+    StudentIntent.DISENGAGEMENT,
     StudentIntent.RELATED_EDUCATIONAL,
     StudentIntent.FAQ,
 }

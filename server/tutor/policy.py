@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from tutor.faq import FAQEntry
-from tutor.intent import is_interrupt_style, is_simple_factual
+from tutor.intent import is_interrupt_style, is_move_on_request, is_simple_factual
 from tutor.practice import MAX_HINT_LEVEL, AnswerEvaluation, PracticeSnapshot
 from tutor.scope import (
     APPLICATION_DOMAIN,
@@ -187,6 +187,7 @@ class ConversationPolicy:
             StudentIntent.DEPTH_MORE: self._depth_more,
             StudentIntent.DEPTH_SHORT: self._depth_short,
             StudentIntent.DEPTH_SIMPLER: self._depth_simpler,
+            StudentIntent.DISENGAGEMENT: self._disengage,
             StudentIntent.TOPIC_CHANGE: self._topic_change,
             StudentIntent.EXPLANATION: self._explain,
             StudentIntent.CLARIFICATION: self._explain,
@@ -684,6 +685,42 @@ class ConversationPolicy:
             check_understanding=False,
         )
 
+    def _disengage(
+        self,
+        intent: StudentIntent,
+        phase: str,
+        state: TutorState,
+        utterance: str,
+        tutor_context: dict[str, Any] | None,
+    ) -> TutorDecision:
+        if is_move_on_request(utterance):
+            strategy = (
+                "They want to leave this problem. Acknowledge the feeling in a few natural words "
+                "('Yeah, we can skip this.'). Do NOT repeat the current question. Do NOT insist they "
+                "finish this step. One short wrap-up of the idea is enough if it helps, then let them "
+                "move on. No quiz. No 'you should first'. No 'what is the largest multiple?'"
+            )
+        else:
+            strategy = (
+                "They sound bored, frustrated, or uninterested — that feeling is the main signal. "
+                "Acknowledge briefly and naturally ('Yeah, let's make this quick.'). Immediately switch "
+                "style: shorter, faster, simpler, spoken. Land the current idea with a concise "
+                "explanation or tiny example, including the result if they are stuck on this question. "
+                "Do NOT ask the same question again. Do NOT use a Socratic quiz. Never use textbook "
+                "lines like 'It looks like you might be overlooking...', 'You should first...', or "
+                "'What is the largest multiple?'. Sound like a patient Class 10 teacher, not an answer key."
+            )
+        return TutorDecision(
+            intent=intent,
+            mode=TeachingMode.LEARN,
+            move=ConversationMove.SHORTEN,
+            response_length=ResponseLength.SHORT,
+            strategy=strategy,
+            allow_reveal_answer=True,
+            check_understanding=False,
+            notes=("engagement",),
+        )
+
     def _topic_change(
         self,
         intent: StudentIntent,
@@ -698,8 +735,9 @@ class ConversationPolicy:
             move=ConversationMove.REDIRECT,
             response_length=ResponseLength.SHORT,
             strategy=(
-                "Acknowledge, then invite them to finish the current section/question "
-                "or change topic using the lesson UI. Natural transition, not 'Now we will proceed'."
+                "They asked to change topic. Acknowledge and let them move on — do not force the "
+                "current problem. Point them to the lesson UI if they need another chapter. "
+                "Natural transition, not 'Now we will proceed'."
             ),
             check_understanding=False,
         )

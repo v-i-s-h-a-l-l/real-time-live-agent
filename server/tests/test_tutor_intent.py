@@ -100,3 +100,19 @@ def test_greeting():
 
 def test_practice_request():
     assert detect_intent("Can you give me another question?") == StudentIntent.PRACTICE_REQUEST
+
+
+def test_disengagement_not_a_practice_answer():
+    phrases = (
+        "This is boring",
+        "This problem is boring",
+        "I don't want to do this",
+        "This is too tedious",
+        "I'm bored",
+        "This is very boring.",
+    )
+    for utterance in phrases:
+        assert detect_intent(utterance) == StudentIntent.DISENGAGEMENT, utterance
+        assert (
+            detect_intent(utterance, phase="practice") == StudentIntent.DISENGAGEMENT
+        ), utterance
