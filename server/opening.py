@@ -13,6 +13,12 @@ _MATCH_LANGUAGE = (
     "After they speak, always match their language (English, Hindi, Tamil, or Telugu)."
 )
 
+# Qwen 3.6 on Groq refuses completions that have only system messages
+# ("No user query found"). Seed the opening turn with a user line so the
+# first spoken greeting can actually generate. That call also warms the
+# model connection before the student's first real utterance.
+OPENING_USER_SEED = "Hi"
+
 
 def opening_system_message(session_store: SessionContextStore) -> str:
     """Spoken-style system instruction for the first LLM turn of a session."""
@@ -48,3 +54,11 @@ def opening_system_message(session_store: SessionContextStore) -> str:
         "they'd like to work on. Keep it natural and brief. "
         f"{_MATCH_LANGUAGE}"
     )
+
+
+def opening_turn_messages(session_store: SessionContextStore) -> list[dict[str, str]]:
+    """System instruction plus the user seed Groq/Qwen requires."""
+    return [
+        {"role": "system", "content": opening_system_message(session_store)},
+        {"role": "user", "content": OPENING_USER_SEED},
+    ]

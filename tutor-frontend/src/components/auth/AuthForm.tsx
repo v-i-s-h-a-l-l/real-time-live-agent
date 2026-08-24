@@ -23,6 +23,9 @@ function errorCopy(code: string): string {
   if (code === "rate_limited" || code === "429") {
     return "Too many attempts. Please wait and try again.";
   }
+  if (code === "check_your_email") {
+    return "If you already have an account, sign in with that email instead.";
+  }
   if (code === "could_not_create") {
     return "Could not create an account. Try a different email.";
   }

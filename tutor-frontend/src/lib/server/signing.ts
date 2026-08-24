@@ -3,7 +3,7 @@
  * Server-only — never import from a client component.
  */
 
-import { createHmac } from "crypto";
+import { createHmac } from "node:crypto";
 
 export function stableStringify(value: unknown): string {
   if (value === null) return "null";
@@ -66,20 +66,31 @@ export function signTutorPayload(
   return signed;
 }
 
-const FALLBACK_SECRET = "drivecare-voice-agent-prod-secret-change-me";
-
-export function sessionSecret(): string {
-  return (
-    (process.env.SESSION_SECRET ?? process.env.AUTH_SECRET ?? "").trim() ||
-    FALLBACK_SECRET
+function requiredSecret(
+  primary: "SESSION_SECRET" | "AUTH_SECRET",
+  secondary: "SESSION_SECRET" | "AUTH_SECRET",
+): string {
+  const first = (process.env[primary] ?? "").trim();
+  if (first) return first;
+  const second = (process.env[secondary] ?? "").trim();
+  if (second) return second;
+  throw new Error(
+    `${primary} is missing (or empty). Set ${primary} or ${secondary} ` +
+      "before starting — there is no default signing secret.",
   );
 }
 
+/** Throws if neither SESSION_SECRET nor AUTH_SECRET is set. */
+export function assertSigningSecrets(): void {
+  sessionSecret();
+}
+
+export function sessionSecret(): string {
+  return requiredSecret("SESSION_SECRET", "AUTH_SECRET");
+}
+
 export function authSecret(): string {
-  return (
-    (process.env.AUTH_SECRET ?? process.env.SESSION_SECRET ?? "").trim() ||
-    FALLBACK_SECRET
-  );
+  return requiredSecret("AUTH_SECRET", "SESSION_SECRET");
 }
 
 export function jwtIssuer(): string {

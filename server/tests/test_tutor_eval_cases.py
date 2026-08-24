@@ -31,8 +31,8 @@ CASES = [
     ("Where do we use this in real life?", "learning", StudentIntent.RELATED_EDUCATIONAL, TeachingMode.LEARN),
     # CASE 9 — Off-topic
     ("Who won the cricket match?", "learning", StudentIntent.UNRELATED, TeachingMode.REDIRECT),
-    # CASE 10 — Short ack (must not lecture)
-    ("Okay.", "learning", StudentIntent.ACKNOWLEDGEMENT, TeachingMode.ACKNOWLEDGE),
+    # CASE 10 — Ready/okay after a transition must continue, not stall
+    ("Okay.", "learning", StudentIntent.EXPLANATION, TeachingMode.LEARN),
 ]
 
 

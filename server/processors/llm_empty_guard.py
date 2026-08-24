@@ -30,6 +30,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from ops_log import ops_event
+from services.llm_retry import LLMRetryInProgressFrame
+
 
 # Timeout fallbacks — LLM was too slow, don't blame the user
 TIMEOUT_FALLBACKS = [
@@ -134,24 +137,27 @@ class LLMEmptyGuardProcessor(FrameProcessor):
         except asyncio.CancelledError:
             return
 
-        # Timer expired and no text arrived — inject timeout fallback
-        # but NOT if this was a background detection turn
+        # Timer expired and no text arrived — inject a hold-on beat, but do
+        # NOT close the LLM turn. Mid-session Groq replies can take >8s of
+        # TTFB on a long context; ending the turn here dropped the real reply.
         if not self._has_text and not self._interrupted and not self._is_background:
             self._timeout_fired = True
             fallback = self._pick_fallback(
                 self._timeout_fallbacks, "_last_timeout_index"
             )
             logger.warning(
-                "[LLMEmptyGuard] LLM timeout ({}s) — injecting: '{}'",
+                "[LLM_RELIABILITY] LLM timeout ({}s) with no text yet — "
+                "holding with '{}' and waiting for the real completion",
                 self._timeout_secs,
                 fallback,
             )
-            await self.push_frame(
-                TextFrame(text=fallback),
-                FrameDirection.DOWNSTREAM,
+            ops_event(
+                "llm_empty_guard_timeout",
+                category="llm",
+                timeout_secs=self._timeout_secs,
             )
             await self.push_frame(
-                LLMFullResponseEndFrame(),
+                TextFrame(text=fallback),
                 FrameDirection.DOWNSTREAM,
             )
 
@@ -164,6 +170,12 @@ class LLMEmptyGuardProcessor(FrameProcessor):
             self._interrupted = False
             self._timeout_fired = False
             self._is_background = False
+            self._cancel_timeout()
+            self._timeout_task = asyncio.create_task(self._on_timeout())
+            await self.push_frame(frame, direction)
+
+        elif isinstance(frame, LLMRetryInProgressFrame):
+            # Retries are still in flight — do not fill in with a hold-on line.
             self._cancel_timeout()
             self._timeout_task = asyncio.create_task(self._on_timeout())
             await self.push_frame(frame, direction)
@@ -208,6 +220,11 @@ class LLMEmptyGuardProcessor(FrameProcessor):
                         "[LLMEmptyGuard] LLM returned empty response (streak={}) — injecting: '{}'",
                         self._consecutive_empties,
                         fallback,
+                    )
+                    ops_event(
+                        "llm_empty_guard_empty",
+                        category="llm",
+                        streak=self._consecutive_empties,
                     )
                     await self.push_frame(
                         TextFrame(text=fallback),

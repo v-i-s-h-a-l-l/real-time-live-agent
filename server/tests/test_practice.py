@@ -98,7 +98,7 @@ def test_correct_answer_is_confirmed_not_re_taught() -> None:
     assert engine.practice.snapshot().correct == 1
 
 
-def test_wrong_answers_walk_up_the_hint_ladder() -> None:
+def test_wrong_answers_walk_up_the_ladder_but_struggle_pacing_does_not_dump_solution() -> None:
     engine, state = _practice_engine()
 
     first = _decide(engine, state, "I think 2 and 4")
@@ -116,8 +116,11 @@ def test_wrong_answers_walk_up_the_hint_ladder() -> None:
 
     fourth = _decide(engine, state, "Then 4 and 4")
     assert fourth.hint_level == 4
-    assert fourth.allow_reveal_answer is True
-    assert fourth.mode == TeachingMode.CORRECT
+    # Multi-attempt struggle overrides the old full-solution dump: one smaller
+    # sub-step and wait, even when the internal ladder reaches its final rung.
+    assert fourth.allow_reveal_answer is False
+    assert fourth.mode == TeachingMode.CLARIFY
+    assert "multi_struggle" in fourth.notes
 
 
 def test_hint_request_is_not_scored_as_a_wrong_answer() -> None:

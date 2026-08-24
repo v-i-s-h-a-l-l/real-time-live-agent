@@ -98,6 +98,25 @@ class TutorState:
     last_confusion_focus: str | None = None
     depth_preference: str = "normal"  # short | normal | deep | beginner
     off_topic_count: int = 0
+    consecutive_drift: int = 0
+    student_turns: int = 0
+    session_started_at: float | None = None
+    last_need_kind: str | None = None
+    last_steer_action: str | None = None
+    awaiting_return: bool = False
+    awaiting_reason: bool = False
+    awaiting_done_choice: bool = False
+    reengage_attempted: bool = False
+    last_recovery: str | None = None
+    awaiting_recovery_work: bool = False
+    soft_tone_remaining: int = 0
+    just_corrected: bool = False
+    struggle_pacing: bool = False
+    check_in_asked: bool = False
+    check_in_clarified: bool = False
+    awaiting_misses: int = 0
+    awaiting_since_at: float | None = None
+    session_signals: tuple[str, ...] = ()
     application_domain: str = "Class 10 Mathematics Tutor"
     subject: str = "Mathematics"
 
@@ -122,6 +141,26 @@ class TutorState:
         if self.current_section_id != prev_section:
             self.confusion_streak = 0
             self.last_confusion_focus = None
+
+    def any_awaiting(self) -> bool:
+        return (
+            self.awaiting_return
+            or self.awaiting_reason
+            or self.awaiting_done_choice
+            or self.awaiting_recovery_work
+            or self.check_in_asked
+        )
+
+    def clear_awaiting(self) -> None:
+        """Drop stuck awaiting_* flags. Keep recovery notes/signals in context."""
+        self.awaiting_return = False
+        self.awaiting_reason = False
+        self.awaiting_done_choice = False
+        self.awaiting_recovery_work = False
+        self.check_in_asked = False
+        self.check_in_clarified = False
+        self.awaiting_misses = 0
+        self.awaiting_since_at = None
 
     def sync_from_session_context(self, ctx: dict[str, Any] | None) -> None:
         if not ctx:

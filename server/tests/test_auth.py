@@ -33,6 +33,7 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setattr(config, "ENVIRONMENT", "development")
     monkeypatch.setattr(config, "ALLOW_ANONYMOUS_WS", False)
     monkeypatch.setattr(config, "REDIS_URL", "")
+    monkeypatch.setattr(config, "ENABLE_DEMO_LOGIN", False)
     reset_store_for_tests(db)
     reset_rate_limiter_for_tests()
     return TestClient(main.app)
@@ -88,8 +89,9 @@ def test_signup_signin_me_and_signout(tmp_path, monkeypatch):
         "/auth/signup",
         json={"email": "ada@school.in", "password": STRONG},
     )
-    assert duplicate.status_code == 200
-    assert duplicate.json()["access_token"]
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "check_your_email"
+    assert "access_token" not in duplicate.json()
 
     denied = client.post(
         "/auth/signin",
@@ -125,8 +127,10 @@ def test_signup_signin_me_and_signout(tmp_path, monkeypatch):
     assert reused.status_code == 401
 
 
-def test_signup_same_email_resets_password(tmp_path, monkeypatch):
+def test_signup_existing_email_does_not_reset_password(tmp_path, monkeypatch):
     client = _client(monkeypatch, tmp_path)
+    from auth.store import get_store
+
     first = client.post(
         "/auth/signup",
         json={"email": "same@school.in", "password": STRONG},
@@ -134,27 +138,35 @@ def test_signup_same_email_resets_password(tmp_path, monkeypatch):
     assert first.status_code == 200
     user_id = verify_access_token(first.json()["access_token"])["sub"]
     old_refresh = first.json()["refresh_token"]
+    original = get_store().get_user_by_email("same@school.in")
+    assert original is not None
+    original_hash = original.password_hash
 
-    new_password = "NewPass123!"
     again = client.post(
         "/auth/signup",
-        json={"email": "same@school.in", "password": new_password},
+        json={"email": "same@school.in", "password": "NewPass123!"},
     )
-    assert again.status_code == 200
-    new_claims = verify_access_token(again.json()["access_token"])
-    assert new_claims is not None
-    assert new_claims["sub"] == user_id
+    assert again.status_code == 409
+    assert again.json()["detail"] == "check_your_email"
+    assert "access_token" not in again.json()
+
+    unchanged = get_store().get_user_by_email("same@school.in")
+    assert unchanged is not None
+    assert unchanged.id == user_id
+    assert unchanged.password_hash == original_hash
+    assert unchanged.is_active is True
 
     assert client.post(
         "/auth/signin",
-        json={"email": "same@school.in", "password": STRONG},
+        json={"email": "same@school.in", "password": "NewPass123!"},
     ).status_code == 401
     ok = client.post(
         "/auth/signin",
-        json={"email": "same@school.in", "password": new_password},
+        json={"email": "same@school.in", "password": STRONG},
     )
     assert ok.status_code == 200
-    assert client.post("/auth/refresh", json={"refresh_token": old_refresh}).status_code == 401
+    rotated = client.post("/auth/refresh", json={"refresh_token": old_refresh})
+    assert rotated.status_code == 200
 
 
 def test_signup_rejects_weak_passwords(tmp_path, monkeypatch):
@@ -302,3 +314,103 @@ def test_signin_rate_limit(tmp_path, monkeypatch):
         )
     assert last is not None
     assert last.status_code == 429
+
+
+def test_legacy_credentials_are_rejected_and_not_seeded(tmp_path, monkeypatch):
+    client = _client(monkeypatch, tmp_path)
+    from auth.store import get_store
+
+    assert get_store().get_user_by_email("abcd@gmail.com") is None
+    denied = client.post(
+        "/auth/signin",
+        json={"email": "abcd@gmail.com", "password": "Abcdef@123"},
+    )
+    assert denied.status_code == 401
+    created = client.post(
+        "/auth/signup",
+        json={"email": "abcd@gmail.com", "password": STRONG},
+    )
+    assert created.status_code == 409
+
+
+def test_production_ignores_demo_login_flag(tmp_path, monkeypatch):
+    db = str(tmp_path / "auth.sqlite")
+    monkeypatch.setattr(config, "SESSION_SECRET", SECRET)
+    monkeypatch.setattr(config, "AUTH_SECRET", SECRET)
+    monkeypatch.setattr(config, "AUTH_DB_PATH", db)
+    monkeypatch.setattr(config, "FRONTEND_ORIGINS", ["http://testserver"])
+    monkeypatch.setattr(config, "ENVIRONMENT", "production")
+    monkeypatch.setattr(config, "ALLOW_ANONYMOUS_WS", False)
+    monkeypatch.setattr(config, "REDIS_URL", "")
+    monkeypatch.setattr(config, "ENABLE_DEMO_LOGIN", True)
+    monkeypatch.setattr(config, "DEMO_LOGIN_EMAIL", "dev@localhost")
+    monkeypatch.setattr(config, "DEMO_LOGIN_PASSWORD", STRONG)
+    reset_store_for_tests(db)
+    reset_rate_limiter_for_tests()
+    from auth.store import get_store
+
+    assert get_store().get_user_by_email("dev@localhost") is None
+    assert get_store().get_user_by_email("abcd@gmail.com") is None
+    client = TestClient(main.app)
+    denied = client.post(
+        "/auth/signin",
+        json={"email": "dev@localhost", "password": STRONG},
+    )
+    assert denied.status_code == 401
+
+
+def test_demo_login_opt_in_seeds_user_outside_production(tmp_path, monkeypatch):
+    db = str(tmp_path / "auth.sqlite")
+    monkeypatch.setattr(config, "SESSION_SECRET", SECRET)
+    monkeypatch.setattr(config, "AUTH_SECRET", SECRET)
+    monkeypatch.setattr(config, "AUTH_DB_PATH", db)
+    monkeypatch.setattr(config, "FRONTEND_ORIGINS", ["http://testserver"])
+    monkeypatch.setattr(config, "ENVIRONMENT", "development")
+    monkeypatch.setattr(config, "ALLOW_ANONYMOUS_WS", False)
+    monkeypatch.setattr(config, "REDIS_URL", "")
+    monkeypatch.setattr(config, "ENABLE_DEMO_LOGIN", True)
+    monkeypatch.setattr(config, "DEMO_LOGIN_EMAIL", "dev@localhost")
+    monkeypatch.setattr(config, "DEMO_LOGIN_PASSWORD", STRONG)
+    reset_store_for_tests(db)
+    reset_rate_limiter_for_tests()
+    client = TestClient(main.app)
+    signed = client.post(
+        "/auth/signin",
+        json={"email": "dev@localhost", "password": STRONG},
+    )
+    assert signed.status_code == 200
+    assert "access_token" in signed.json()
+
+
+def test_legacy_bootstrap_row_is_locked_on_init(tmp_path, monkeypatch):
+    import sqlite3
+    import time as time_mod
+
+    from auth.store import AuthStore, get_store
+
+    db = str(tmp_path / "legacy.sqlite")
+    monkeypatch.setattr(config, "ENABLE_DEMO_LOGIN", False)
+    AuthStore(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, is_active, created_at) "
+            "VALUES (?, ?, ?, 1, ?)",
+            ("legacy-id", "abcd@gmail.com", "not-a-real-hash", time_mod.time()),
+        )
+        conn.execute(
+            "INSERT INTO refresh_sessions "
+            "(id, user_id, token_hash, family_id, expires_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("sess", "legacy-id", "abc", "fam", time_mod.time() + 9_999, time_mod.time()),
+        )
+    reset_store_for_tests(db)
+    user = get_store().get_user_by_email("abcd@gmail.com")
+    assert user is not None
+    assert user.is_active is False
+    with sqlite3.connect(db) as conn:
+        revoked = conn.execute(
+            "SELECT revoked_at FROM refresh_sessions WHERE id = ?",
+            ("sess",),
+        ).fetchone()
+    assert revoked is not None
+    assert revoked[0] is not None

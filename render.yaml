@@ -1,6 +1,10 @@
 # Render Blueprint — Lumina voice backend
 # https://render.com/docs/blueprint-spec
 #
+# Production LLM is OpenAI (LLM_PROVIDER=openai). GROQ/GEMINI/OPENROUTER
+# keys are optional fallbacks only if you change LLM_PROVIDER.
+# Do not set CEREBRAS_*. Env table must match railway.toml comments.
+#
 # Default: native Python (existing). To deploy the Docker image instead:
 #   runtime: docker
 #   dockerfilePath: ./server/Dockerfile
@@ -27,14 +31,26 @@ services:
         value: /opt/render/project/src/.cargo
       - key: RUSTUP_HOME
         value: /opt/render/project/src/.rustup
-      - key: CEREBRAS_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: SARVAM_API_KEY
         sync: false
       - key: CARTESIA_API_KEY
         sync: false
-      - key: GROQ_API_KEY
-        sync: false
+      - key: LLM_PROVIDER
+        value: openai
+      - key: ENABLE_DEMO_LOGIN
+        value: "0"
+      - key: CALL_MUTE_TIMEOUT_SECS
+        value: "40"
+      - key: CALL_MUTE_RESUME_MIN_WORDS
+        value: "6"
+      - key: AWAITING_TIMEOUT_SECS
+        value: "40"
+      - key: AWAITING_MISS_RESUME_AFTER
+        value: "3"
+      - key: LLM_EMPTY_GUARD_TIMEOUT_SECS
+        value: "20"
       - key: SESSION_SECRET
         sync: false
       - key: AUTH_SECRET

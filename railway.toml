@@ -1,11 +1,58 @@
 # Railway / Railpack — FastAPI lives in server/, not the repo root.
 # https://docs.railway.com/guides/config-as-code
+#
+# railway.toml cannot declare env vars: the official schema has no
+# [variables] section (additionalProperties=false). Set secrets and
+# non-secret prod values in the Railway dashboard. This comment block
+# is the inventory that docs/deployment.md and docs/ARCHITECTURE.md
+# must match.
+#
+# Production LLM is OpenAI (config.py: LLM_PROVIDER default "openai").
+# There is no Cerebras path in this codebase. Do not set CEREBRAS_*.
+#
+# Required in the Railway dashboard (never commit values):
+#   OPENAI_API_KEY
+#   SARVAM_API_KEY
+#   CARTESIA_API_KEY
+#   SESSION_SECRET
+#   FRONTEND_ORIGIN
+#   REDIS_URL
+#   ENVIRONMENT=production
+#
+# Dashboard defaults that match config.py (set explicitly so leftover
+# Groq/Cerebras values cannot override the code default):
+#   LLM_PROVIDER=openai
+#   ALLOW_ANONYMOUS_WS=0
+#   ENABLE_DEMO_LOGIN=0          # must be unset or false in prod
+#   HOST=0.0.0.0
+#   RNNOISE_ENABLED=false
+#   MAX_CONCURRENT_SESSIONS=20
+#   CALL_MUTE_TIMEOUT_SECS=40
+#   CALL_MUTE_RESUME_MIN_WORDS=6
+#   AWAITING_TIMEOUT_SECS=40
+#   AWAITING_MISS_RESUME_AFTER=3
+#   LLM_EMPTY_GUARD_TIMEOUT_SECS=20
+#
+# Optional:
+#   AUTH_SECRET                 (falls back to SESSION_SECRET)
+#   LLM_MODEL                   (default gpt-5.6-luna when LLM_PROVIDER=openai)
+#   TTS_FALLBACK_PROVIDER=openai  (Cartesia 402 → OpenAI TTS; needs OPENAI_API_KEY)
+#   GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY
+#     only if you set LLM_PROVIDER to groq | gemini | openrouter
+#
+# No Sentry / APM DSN exists in config.py — do not invent one.
+#
+# Healthcheck is GET /ready. missing_required_keys() fails the check
+# when OPENAI_API_KEY is missing (LLM_PROVIDER=openai). Application
+# note: /ready does not echo LLM_PROVIDER in the JSON body. REDIS_URL
+# is required in this inventory; config.py currently only *warns* if
+# it is unset (not a /ready blocker). Set it in the dashboard anyway.
 
 [build]
 builder = "RAILPACK"
 
 [deploy]
 startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server"
-healthcheckPath = "/health"
+healthcheckPath = "/ready"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"

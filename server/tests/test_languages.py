@@ -15,10 +15,16 @@ from languages import (  # noqa: E402
     LANG_HI,
     LANG_TA,
     LANG_TE,
+    SCRIPT_NATIVE,
+    SCRIPT_ROMAN,
     SUPPORTED_LANGUAGES,
     detect_from_script,
     detect_language_request,
+    detect_romanized_indic_language,
+    detect_script_mode,
     display_name,
+    looks_like_full_english,
+    looks_like_romanized_indic,
     normalize_session_lang,
     resolve_detected_language,
     significant_char_count,
@@ -115,6 +121,44 @@ def test_switch_request_written_in_the_student_own_script():
     assert detect_language_request("இதை ஆங்கிலத்தில் சொல்லுங்க") == LANG_EN
     assert detect_language_request("ఇంగ్లీష్‌లో చెప్పండి") == LANG_EN
     assert detect_language_request("तमिल में समझाओ") == LANG_TA
+
+
+def test_capability_question_counts_as_switch_hindi_roman():
+    for phrase in (
+        "hindi malum hai kya",
+        "hindi aata hai kya",
+        "hindi bol sakte ho",
+        "kya aap hindi jaante ho",
+        "do you know hindi",
+        "can you speak hindi",
+    ):
+        assert detect_language_request(phrase) == LANG_HI, phrase
+
+
+def test_capability_question_counts_as_switch_tamil_roman():
+    for phrase in (
+        "tamil theriyuma",
+        "tamil pesa mudiyuma",
+        "do you know tamil",
+        "can you speak tamil",
+    ):
+        assert detect_language_request(phrase) == LANG_TA, phrase
+
+
+def test_capability_question_counts_as_switch_telugu_roman():
+    for phrase in (
+        "telugu telusa",
+        "telugu matladagaligaru",
+        "do you know telugu",
+    ):
+        assert detect_language_request(phrase) == LANG_TE, phrase
+
+
+def test_capability_question_counts_as_switch_native_script():
+    assert detect_language_request("तमिल मालूम है क्या") == LANG_TA
+    assert detect_language_request("தமிழ் தெரியுமா") == LANG_TA
+    assert detect_language_request("తెలుగు తెలుసా") == LANG_TE
+    assert detect_language_request("हिंदी आती है क्या") == LANG_HI
 
 
 def test_mere_mention_is_not_a_switch_request():
@@ -235,6 +279,50 @@ def test_low_confidence_keeps_none_for_ambiguous():
         min_confidence=0.9,
     )
     assert detected is None
+
+
+def test_script_mode_roman_vs_native():
+    assert detect_script_mode("enna panrom") == SCRIPT_ROMAN
+    assert detect_script_mode("இந்த equation") == SCRIPT_NATIVE
+    assert detect_script_mode("इस slide को") == SCRIPT_NATIVE
+    assert detect_script_mode("...") is None
+
+
+def test_romanized_indic_is_not_full_english():
+    assert looks_like_romanized_indic("enna solve pannu")
+    assert looks_like_romanized_indic("theek hai next")
+    assert not looks_like_full_english("enna solve pannu")
+    assert not looks_like_full_english("ok next slide")
+    assert looks_like_full_english("can you explain this equation")
+    assert looks_like_full_english("I really did not understand that part")
+
+
+def test_detect_romanized_indic_language_picks_specific_language():
+    assert detect_romanized_indic_language("yaar mujhe samajh nahi aa raha") == LANG_HI
+    assert detect_romanized_indic_language("enna pannu neenga sollunga") == LANG_TA
+    assert detect_romanized_indic_language("nenu enti cheppu unnadu") == LANG_TE
+
+
+def test_roman_tamil_handles_common_variants_and_enclitics():
+    # "ennada" (enna+da), "ivlo", "kastama" (no h), "iruku" (single k)
+    assert detect_romanized_indic_language("ennada ivlo kastama iruku") == LANG_TA
+    assert detect_romanized_indic_language("puriyala saar romba kastam") == LANG_TA
+    assert detect_romanized_indic_language("konjam thaan pannunga") == LANG_TA
+
+
+def test_roman_hindi_handles_common_variants():
+    assert detect_romanized_indic_language("yeh concept bahut mushkil hai") == LANG_HI
+    assert detect_romanized_indic_language("mujhe samajhna nahi aa raha yaar") == LANG_HI
+
+
+def test_roman_telugu_handles_common_variants():
+    assert detect_romanized_indic_language("naaku artham kavatledu chala kashtam") == LANG_TE
+
+
+def test_detect_romanized_indic_language_none_for_short_or_english():
+    assert detect_romanized_indic_language("okay next slide please") is None
+    assert detect_romanized_indic_language("hai") is None  # single token, ambiguous
+    assert detect_romanized_indic_language("") is None
 
 
 def test_context_across_languages_is_caller_responsibility():

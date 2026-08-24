@@ -7,7 +7,7 @@ Built as a **real-time voice conversation engine** (not a chatbot with TTS bolte
 | Layer | Path | Deploy target |
 |-------|------|---------------|
 | **Frontend** | [`tutor-frontend/`](tutor-frontend/) | [Vercel](https://vercel.com) |
-| **Backend** | [`server/`](server/) | [Render](https://render.com) |
+| **Backend** | [`server/`](server/) | [Railway](https://railway.com) (Render alternative) |
 
 **Deep dives:** [Architecture](docs/ARCHITECTURE.md) · [Production deployment](docs/deployment.md) · [Long-session QA checklist](docs/LONG_SESSION_TEST_CHECKLIST.md)
 
@@ -153,10 +153,10 @@ Only capabilities **implemented in this repository** are listed.
 
 ### Reliability
 
-- LLM failover: Cerebras → optional second Cerebras key → Groq
+- LLM provider switch: OpenAI default; Groq / Gemini / OpenRouter via `LLM_PROVIDER`
 - Sarvam STT reconnect wrapper (WebSocket drop recovery)
 - Transcription dedup + LLM inference dedup
-- Empty LLM response guard (8 s timeout + spoken fallback)
+- Empty LLM response guard (`LLM_EMPTY_GUARD_TIMEOUT_SECS`, default 20 s + spoken fallback)
 - Fail-safe RNNoise passthrough if library unavailable
 - Structured ops logging (`ops_log.py`)
 
@@ -190,7 +190,7 @@ flowchart TD
 
 **Step-by-step (actual implementation):**
 
-1. Student signs in (`/signin`) — JWT cookies set via Next.js BFF → Render `/auth/*`
+1. Student signs in (`/signin`) — JWT cookies set via Next.js BFF → Railway `/auth/*`
 2. Dashboard (`/`) shows Class 10 Mathematics (English is “coming soon” placeholder)
 3. Student picks chapter → topic
 4. Lesson page loads topic content from `CurriculumService` (public bundle — no answers)
@@ -220,15 +220,14 @@ flowchart TB
     API["/api/* BFF routes"]
   end
 
-  subgraph Render["Render"]
+  subgraph Railway["Railway"]
     FastAPI[FastAPI]
     Pipe[Pipecat pipeline]
   end
 
   subgraph External["External APIs"]
     Sarvam[Sarvam STT]
-    Cerebras[Cerebras LLM]
-    Groq[Groq LLM]
+    OpenAI[OpenAI LLM]
     Cartesia[Cartesia TTS]
   end
 
@@ -238,15 +237,14 @@ flowchart TB
   Mic --> WSClient
   FastAPI --> Pipe
   Pipe --> Sarvam
-  Pipe --> Cerebras
-  Pipe --> Groq
+  Pipe --> OpenAI
   Pipe --> Cartesia
   Pipe -->|PCM out| Spk
 ```
 
 | Layer | Responsibility |
 |-------|----------------|
-| **Next.js (Vercel)** | Auth UI, curriculum navigation, lesson UX, BFF proxy to Render, voice ticket minting |
+| **Next.js (Vercel)** | Auth UI, curriculum navigation, lesson UX, BFF proxy to Railway, voice ticket minting |
 | **VoiceAgentClient** | WebSocket, mic capture, playback, barge-in, reconnect — **not proxied through Vercel** |
 | **FastAPI** | HTTP auth, health/ready, WebSocket `/ws`, static debug UI (dev only) |
 | **Pipecat** | Frame-based real-time pipeline orchestration |
@@ -292,7 +290,7 @@ flowchart TB
 | 21 | `ContextSanitizerProcessor` | Context hygiene |
 | 22 | `LLMInferenceDedupProcessor` | Prevent double LLM calls |
 | 23 | `PivotDetectorProcessor` | Topic pivot awareness |
-| 24 | **FailoverLLMService** | Cerebras → Groq chain |
+| 24 | **LLM service** | OpenAI (`LLM_PROVIDER=openai`); Groq/Gemini/OpenRouter on switch |
 | 25 | `ResponseNaturalizerProcessor` | Spoken-style text; invokes math speech |
 | 26 | `LLMEmptyGuardProcessor` | Timeout + fallback line if model empty |
 | 27 | `TtsApplyVoiceProcessor` | Apply Cartesia voice ID |
@@ -308,7 +306,7 @@ flowchart LR
   Denoise --> VAD[Silero VAD]
   VAD --> STT[Sarvam STT]
   STT --> Lang[Language tracker]
-  Lang --> LLM[Cerebras / Groq]
+  Lang --> LLM[OpenAI]
   LLM --> Nat[Naturalizer + speak_math]
   Nat --> TTS[Cartesia]
   TTS --> WS
@@ -412,14 +410,12 @@ Five Cartesia voices (Riya, Akshara, Shanti, Vishal, Dev) — labeled with regio
 
 | Setting | Value |
 |---------|-------|
-| **Primary** | Cerebras — `gpt-oss-120b` |
-| **Fallback 1** | Second Cerebras key (`CEREBRAS_API_KEY_2`) — same model, separate rate limit |
-| **Fallback 2** | Groq — `openai/gpt-oss-120b` |
+| **Primary** | OpenAI — `gpt-5.6-luna` (`LLM_PROVIDER=openai`) |
+| **Optional switch** | `LLM_PROVIDER=groq` / `gemini` / `openrouter` (needs that provider's key) |
 | **Temperature** | 0.6 |
 | **Max tokens** | 384 completion |
-| **Reasoning** | `low` |
 
-**Failover** (`FailoverLLMService`): primary exception → try fallbacks in order → re-raise last error so `LLMEmptyGuardProcessor` can speak a graceful line. Ops events: `cerebras_429`, `groq_failover`, `llm_request_failure`.
+There is no Cerebras path and no `FailoverLLMService`. Empty output is handled by `LLMEmptyGuardProcessor` (`LLM_EMPTY_GUARD_TIMEOUT_SECS`, default 20).
 
 **Prompt strategy:** Class 10 maths tutor system prompt + injected context markers + tutor turn directives. Not documented verbatim here (see `server/tutor/prompts.py`).
 
@@ -515,7 +511,7 @@ Class 10
 
 ### Recommended for future production hardening
 
-- PostgreSQL for durable user accounts (SQLite is ephemeral on Render)
+- PostgreSQL for durable user accounts (SQLite is ephemeral on Railway)
 - Redis required (not optional) for multi-instance rate limits + voice JTI
 - JWT validation in Next.js middleware (currently cookie presence only)
 - Centralized monitoring / alerting (not implemented)
@@ -527,18 +523,18 @@ Class 10
 
 | Capability | Status |
 |------------|--------|
-| **Structured ops logs** | JSON `ops` events via loguru (`ws_open`, `stt_reconnect_*`, `groq_failover`, etc.) |
+| **Structured ops logs** | JSON `ops` events via loguru (`ws_open`, `stt_reconnect_*`, `llm_request_failure`, etc.) |
 | **`GET /health`** | Process alive — no external API calls |
-| **`GET /ready`** | API keys + production config blockers |
-| **LLM failover** | Cerebras → Groq with ops logging |
+| **`GET /ready`** | API keys + production config blockers (Railway healthcheck). Does not echo `LLM_PROVIDER`. |
+| **LLM provider** | OpenAI default; optional Groq/Gemini/OpenRouter via `LLM_PROVIDER` |
 | **STT reconnect** | `ReconnectingSarvamSTTService` on Sarvam WebSocket drop |
-| **Empty LLM guard** | 8 s timeout + spoken fallback |
+| **Empty LLM guard** | `LLM_EMPTY_GUARD_TIMEOUT_SECS` (default 20) + spoken fallback |
 | **Voice connection UI** | Banner on WebSocket failure / reconnect |
 | **TTS failure ops event** | Not implemented (would need pipeline hook) |
 | **Metrics dashboard** | **Planned** — not implemented |
 | **Sentry / Datadog** | **Planned** — not implemented |
 
-Logs go to **stdout/stderr** (Render-compatible). No secrets, JWTs, or audio in ops logs.
+Logs go to **stdout/stderr** (Railway-compatible). No secrets, JWTs, or audio in ops logs.
 
 ---
 
@@ -547,7 +543,7 @@ Logs go to **stdout/stderr** (Render-compatible). No secrets, JWTs, or audio in 
 ### Architecture choices
 
 - **Streaming audio** over WebSocket — not request/response HTTP for voice
-- **Direct browser → Render WSS** — Vercel not in the audio path
+- **Direct browser → Railway WSS** — Vercel not in the audio path
 - **Streaming LLM + TTS** — frames forwarded as produced
 - **VAD-driven turns** — no polling for speech detection
 - **Deterministic math speech** — zero extra LLM calls for pronunciation
@@ -574,19 +570,17 @@ End-to-end turn latency is dominated by external APIs — no invented p50/p95 nu
 flowchart TB
   Browser[Student browser]
   Vercel[Vercel — Next.js]
-  Render[Render — FastAPI + Pipecat]
+  Railway[Railway — FastAPI + Pipecat]
   Sarvam[Sarvam]
-  Cerebras[Cerebras]
-  Groq[Groq]
+  OpenAI[OpenAI]
   Cartesia[Cartesia]
 
   Browser -->|HTTPS pages + /api/*| Vercel
-  Browser -->|WSS audio direct| Render
-  Vercel -->|HTTPS auth proxy| Render
-  Render --> Sarvam
-  Render --> Cerebras
-  Render --> Groq
-  Render --> Cartesia
+  Browser -->|WSS audio direct| Railway
+  Vercel -->|HTTPS auth proxy| Railway
+  Railway --> Sarvam
+  Railway --> OpenAI
+  Railway --> Cartesia
 ```
 
 **Why WebSocket bypasses Vercel:** Real-time PCM cannot be proxied through serverless functions without unacceptable latency and cost. Only auth/tickets use the Next.js BFF.
@@ -597,7 +591,7 @@ Full step-by-step: **[docs/deployment.md](docs/deployment.md)**
 
 ## 18. Environment variables
 
-### Backend (Render / `server/`)
+### Backend (Railway / `server/`)
 
 | Variable | Required (prod) | Scope | Description |
 |----------|-----------------|-------|-------------|
@@ -606,14 +600,24 @@ Full step-by-step: **[docs/deployment.md](docs/deployment.md)**
 | `AUTH_SECRET` | optional | server | JWT key; defaults to `SESSION_SECRET` |
 | `FRONTEND_ORIGIN` | yes | server | Vercel origin(s) for CORS + WS origin check |
 | `SARVAM_API_KEY` | yes | server | STT |
-| `CEREBRAS_API_KEY` | yes | server | Primary LLM |
+| `OPENAI_API_KEY` | yes | server | LLM (`LLM_PROVIDER=openai`) |
 | `CARTESIA_API_KEY` | yes | server | TTS |
-| `GROQ_API_KEY` | recommended | server | LLM failover |
-| `CEREBRAS_API_KEY_2` | optional | server | Second Cerebras rate-limit bucket |
-| `REDIS_URL` | scale | server | Shared auth rate limits |
+| `LLM_PROVIDER` | yes | server | Default `openai`. Set explicitly so leftover Groq/Cerebras values cannot win. |
+| `LLM_MODEL` | optional | server | Default `gpt-5.6-luna` when provider is openai |
+| `REDIS_URL` | yes | server | Shared auth rate limits / tickets. App currently *warns* if unset; still required here. |
 | `ALLOW_ANONYMOUS_WS` | yes (`0`) | server | Must be off in production |
+| `ENABLE_DEMO_LOGIN` | yes (unset/`0`) | server | Must be unset or false in prod |
+| `CALL_MUTE_TIMEOUT_SECS` | no | server | Default `40` |
+| `CALL_MUTE_RESUME_MIN_WORDS` | no | server | Default `6` |
+| `AWAITING_TIMEOUT_SECS` | no | server | Default `40` |
+| `AWAITING_MISS_RESUME_AFTER` | no | server | Default `3` |
+| `LLM_EMPTY_GUARD_TIMEOUT_SECS` | no | server | Default `20` |
+| `TTS_FALLBACK_PROVIDER` | optional | server | `openai` for Cartesia 402 failover |
+| `GROQ_API_KEY` | optional | server | Only if `LLM_PROVIDER=groq` |
+| `GEMINI_API_KEY` | optional | server | Only if `LLM_PROVIDER=gemini` |
+| `OPENROUTER_API_KEY` | optional | server | Only if `LLM_PROVIDER=openrouter` |
 | `RNNOISE_ENABLED` | no | server | `false` default |
-| `HOST` / `PORT` | auto | server | Render injects `PORT`; bind `0.0.0.0` |
+| `HOST` / `PORT` | auto | server | Railway injects `PORT`; bind `0.0.0.0` |
 | `MAX_CONCURRENT_SESSIONS` | no | server | Default 20 |
 | `MAX_CONNECTS_PER_IP_PER_MIN` | no | server | Default 8 |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | no | server | Default `lumina` / `lumina-app` |
@@ -623,16 +627,18 @@ Full step-by-step: **[docs/deployment.md](docs/deployment.md)**
 | `AUTH_DB_PATH` | no | server | SQLite path (default `server/data/auth.sqlite`) |
 | `DEBUG_TTS_INPUT` | no | server | Dev-only TTS debug |
 
-Template: [`.env.example`](.env.example)
+Do not set `CEREBRAS_API_KEY`. There is no Sentry DSN in `config.py`.
+
+Template: [`.env.example`](.env.example). Inventory also in [`railway.toml`](railway.toml) comments and [`docs/deployment.md`](docs/deployment.md).
 
 ### Frontend (Vercel / `tutor-frontend/`)
 
 | Variable | Required (prod) | Scope | Description |
 |----------|-----------------|-------|-------------|
-| `NEXT_PUBLIC_VOICE_WS_URL` | yes | **browser-safe** | `wss://your-service.onrender.com/ws` |
+| `NEXT_PUBLIC_VOICE_WS_URL` | yes | **browser-safe** | `wss://YOUR-SERVICE.up.railway.app/ws` |
 | `NEXT_PUBLIC_VOICE_LANG` | no | browser-safe | Default `auto` |
-| `VOICE_API_URL` | yes | server-only | `https://your-service.onrender.com` |
-| `SESSION_SECRET` | yes | server-only | Must match Render |
+| `VOICE_API_URL` | yes | server-only | `https://YOUR-SERVICE.up.railway.app` |
+| `SESSION_SECRET` | yes | server-only | Must match Railway |
 | `AUTH_SECRET` | optional | server-only | JWT verification |
 
 Template: [`tutor-frontend/.env.example`](tutor-frontend/.env.example)
@@ -647,14 +653,14 @@ Template: [`tutor-frontend/.env.example`](tutor-frontend/.env.example)
 
 - **Python 3.12** (3.13 not supported by current pins)
 - **Node.js 20+**
-- API keys: Sarvam, Cerebras, Cartesia; Groq recommended for failover
+- API keys: Sarvam, OpenAI, Cartesia
 
 ### Backend
 
 ```bash
 cd real-time-live-agent
 cp .env.example .env
-# Fill SARVAM_API_KEY, CEREBRAS_API_KEY, CARTESIA_API_KEY, SESSION_SECRET
+# Fill SARVAM_API_KEY, OPENAI_API_KEY, CARTESIA_API_KEY, SESSION_SECRET, LLM_PROVIDER=openai
 
 pip install -r requirements.txt
 
@@ -700,23 +706,24 @@ CI runs both on push/PR via [`.github/workflows/ci.yml`](.github/workflows/ci.ym
 
 ## 20. Production deployment
 
-### Backend → Render
+### Backend → Railway
 
-1. Connect GitHub repo; use [`render.yaml`](render.yaml) or manual Web Service
+1. Connect GitHub repo; [`railway.toml`](railway.toml) supplies builder, start command, and `GET /ready` healthcheck
 2. **Root directory:** `.` (repo root)
-3. **Build:** `pip install --upgrade pip && pip install -r requirements.txt`
-4. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server`
-5. **Plan:** Standard (~2 GB RAM) — torch + Silero need memory
-6. Set secrets: API keys, `SESSION_SECRET`, `ENVIRONMENT=production`, `ALLOW_ANONYMOUS_WS=0`
-7. Confirm `https://YOUR-SERVICE.onrender.com/health`
+3. **Start:** `uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir server` (already in `railway.toml`)
+4. **RAM:** ≥2 GB — torch + Silero need memory
+5. Set dashboard secrets from [§18](#18-environment-variables): `OPENAI_API_KEY`, `SARVAM_API_KEY`, `CARTESIA_API_KEY`, `SESSION_SECRET`, `FRONTEND_ORIGIN`, `REDIS_URL`, `ENVIRONMENT=production`, `LLM_PROVIDER=openai`, `ALLOW_ANONYMOUS_WS=0`, `ENABLE_DEMO_LOGIN=0`
+6. Confirm `https://YOUR-SERVICE.up.railway.app/ready` returns ready (will 503 until keys + `FRONTEND_ORIGIN` + `SESSION_SECRET` are set)
+
+Render remains an alternative via [`render.yaml`](render.yaml) (`GET /health` liveness, not `/ready`).
 
 ### Frontend → Vercel
 
 1. Import repo; set **Root Directory** = `tutor-frontend`
 2. Set env vars (see [§18](#18-environment-variables))
 3. Deploy; note Vercel URL
-4. Set Render `FRONTEND_ORIGIN=https://YOUR-APP.vercel.app`
-5. **Restart Render** after CORS change
+4. Set Railway `FRONTEND_ORIGIN=https://YOUR-APP.vercel.app`
+5. **Restart Railway** after CORS change
 6. Test sign-in → lesson → **Talk to tutor**
 
 Detailed guide: **[docs/deployment.md](docs/deployment.md)**
@@ -780,9 +787,9 @@ Full long-session matrix: **[docs/LONG_SESSION_TEST_CHECKLIST.md](docs/LONG_SESS
 | Failure | Behavior |
 |---------|----------|
 | **Sarvam STT drop** | `ReconnectingSarvamSTTService` reconnects; ops `stt_reconnect_*` logs |
-| **Cerebras rate limit** | Ops `cerebras_429`; failover to next provider |
+| **LLM provider error** | Ops `llm_request_failure`; empty guard may speak a fallback |
 | **All LLMs fail** | Error re-raised; `LLMEmptyGuard` speaks fallback line |
-| **Empty LLM output** | 8 s timeout → injected spoken fallback |
+| **Empty LLM output** | `LLM_EMPTY_GUARD_TIMEOUT_SECS` (default 20) → injected spoken fallback |
 | **TTS error** | Pipeline error logged; user may hear silence for that turn |
 | **WebSocket disconnect** | Client reconnect backoff; banner “Voice connection lost” |
 | **WS auth failure** | Close 4401; user must End → Talk again |
@@ -805,7 +812,7 @@ real-time-live-agent/
 │   ├── src/lib/voice/       # VoiceAgentClient, protocol
 │   ├── src/hooks/           # useVoiceSession, useLessonFlow
 │   └── public/              # audio-processor.js (AudioWorklet)
-├── server/                  # FastAPI + Pipecat → Render
+├── server/                  # FastAPI + Pipecat → Railway
 │   ├── main.py              # HTTP + WebSocket entry
 │   ├── pipeline.py          # Pipecat pipeline assembly
 │   ├── processors/          # Frame processors (23 modules)
@@ -815,8 +822,9 @@ real-time-live-agent/
 │   ├── audio/               # Optional RNNoise
 │   └── tests/               # Pytest suite
 ├── docs/                    # deployment.md, ARCHITECTURE.md, QA checklists
-├── requirements.txt         # Python deps (Render build)
-├── render.yaml              # Render Blueprint
+├── requirements.txt         # Python deps (Railway / Render build)
+├── railway.toml             # Railway config-as-code (healthcheck GET /ready)
+├── render.yaml              # Render Blueprint (alternative; healthcheck GET /health)
 └── .github/workflows/ci.yml
 ```
 
@@ -843,11 +851,11 @@ Legacy debug client in `client/` — not the product UI.
 
 | Method | Path | Auth | Proxies to |
 |--------|------|------|------------|
-| `POST` | `/api/auth/signin` | Public | Render `/auth/signin` |
-| `POST` | `/api/auth/signup` | Public | Render `/auth/signup` |
-| `POST` | `/api/auth/refresh` | Cookie | Render `/auth/refresh` |
-| `POST` | `/api/auth/signout` | Cookie | Render `/auth/signout` |
-| `GET` | `/api/auth/me` | Cookie | Render `/auth/me` |
+| `POST` | `/api/auth/signin` | Public | Railway `/auth/signin` |
+| `POST` | `/api/auth/signup` | Public | Railway `/auth/signup` |
+| `POST` | `/api/auth/refresh` | Cookie | Railway `/auth/refresh` |
+| `POST` | `/api/auth/signout` | Cookie | Railway `/auth/signout` |
+| `GET` | `/api/auth/me` | Cookie | Railway `/auth/me` |
 | `POST` | `/api/voice/session` | Cookie | Voice ticket for WebSocket |
 | `POST` | `/api/tutor-context` | Cookie | Signed tutor context |
 | `POST` | `/api/practice/evaluate` | Cookie | Answer evaluation |
@@ -891,7 +899,7 @@ Everything listed in [§2 Key features](#2-key-features).
 
 | Item | Status |
 |------|--------|
-| PostgreSQL user storage | **Planned** — SQLite ephemeral on Render |
+| PostgreSQL user storage | **Planned** — SQLite ephemeral on Railway |
 | Redis required for multi-instance | **Planned** — optional today |
 | Metrics dashboard (p50/p95 latency) | **Planned** |
 | TTS failure structured logging | **Planned** |
@@ -905,7 +913,7 @@ Everything listed in [§2 Key features](#2-key-features).
 ## 27. FAQ
 
 **How does voice communication work?**  
-Browser captures PCM16 @ 16 kHz via AudioWorklet, sends binary frames over WebSocket to Render. Pipecat pipeline runs STT → LLM → TTS; audio streams back on the same socket.
+Browser captures PCM16 @ 16 kHz via AudioWorklet, sends binary frames over WebSocket to Railway. Pipecat pipeline runs STT → LLM → TTS; audio streams back on the same socket.
 
 **How does interruption work?**  
 Client flushes playback and sends `interrupt`; server Silero VAD + AudioGate + Pipecat cancellation stop TTS; `TurnResetProcessor` cleans partial assistant context.
@@ -919,17 +927,17 @@ Transcript keeps KaTeX. `speak_math.py` transforms LLM text to spoken English be
 **How does multilingual support work?**  
 Sarvam auto-detects language; `LanguageTrackerProcessor` updates session language (`en-IN`, `hi-IN`, `ta-IN`, `te-IN`). Prompts and naturalizer adapt; TTS language updates mid-session.
 
-**What happens if Cerebras fails?**  
-`FailoverLLMService` tries optional second Cerebras key, then Groq. Ops logs capture each failure. If all fail, empty guard speaks a fallback.
+**What happens if the LLM fails?**  
+There is no multi-provider failover chain. OpenAI is the production provider. `LLMEmptyGuardProcessor` speaks a fallback if the model returns empty (`LLM_EMPTY_GUARD_TIMEOUT_SECS`, default 20). Optional: set `LLM_PROVIDER` to groq / gemini / openrouter and the matching key.
 
 **Where are secrets stored?**  
-Backend `.env` (Render dashboard). Frontend `.env.local` (Vercel dashboard) — only `SESSION_SECRET` and `VOICE_API_URL` server-side; API keys never in the browser.
+Backend `.env` (Railway dashboard). Frontend `.env.local` (Vercel dashboard) — only `SESSION_SECRET` and `VOICE_API_URL` server-side; API keys never in the browser.
 
 **How do I deploy?**  
 See [§20](#20-production-deployment) and [docs/deployment.md](docs/deployment.md).
 
 **How do I debug a voice connection?**  
-Check browser DevTools → Network → WS. Verify `NEXT_PUBLIC_VOICE_WS_URL`, matching `SESSION_SECRET`, and Render `FRONTEND_ORIGIN`. Look for ops logs: `ws_auth_failure`, `ws_open`.
+Check browser DevTools → Network → WS. Verify `NEXT_PUBLIC_VOICE_WS_URL`, matching `SESSION_SECRET`, and Railway `FRONTEND_ORIGIN`. Look for ops logs: `ws_auth_failure`, `ws_open`.
 
 **How do I add a new topic?**  
 Add content under `tutor-frontend/src/content/curriculum/class10/mathematics/chapters/` and register in `catalog.ts`. Run frontend validation tests.
@@ -940,14 +948,14 @@ Add content under `tutor-frontend/src/content/curriculum/class10/mathematics/cha
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| 401 on voice session | `SESSION_SECRET` mismatch | Align Vercel + Render secrets; restart both |
-| WebSocket close 4403 | Wrong origin | Set `FRONTEND_ORIGIN` to exact Vercel URL; restart Render |
-| WebSocket close 4408 | Missing API keys or prod config | Check `/ready` in dev; fill Render env |
-| CORS error on sign-in | `FRONTEND_ORIGIN` unset/wrong | Set on Render |
+| 401 on voice session | `SESSION_SECRET` mismatch | Align Vercel + Railway secrets; restart both |
+| WebSocket close 4403 | Wrong origin | Set `FRONTEND_ORIGIN` to exact Vercel URL; restart Railway |
+| WebSocket close 4408 | Missing API keys or prod config | Check `/ready` in dev; fill Railway env |
+| CORS error on sign-in | `FRONTEND_ORIGIN` unset/wrong | Set on Railway |
 | Vercel build fails | `ws://` in production WS URL | Use `wss://` for `NEXT_PUBLIC_VOICE_WS_URL` |
 | Mic permission error | Browser blocked mic | Allow mic; close other apps using mic |
-| No STT transcripts | Sarvam key or STT disconnect | Check Render logs for `stt_connection_failure` |
-| No TTS audio | Cartesia key or pipeline error | Check `/ready`; Render logs |
+| No STT transcripts | Sarvam key or STT disconnect | Check Railway logs for `stt_connection_failure` |
+| No TTS audio | Cartesia key or pipeline error | Check `/ready`; Railway logs |
 | Env change ignored | Next.js caches env at start | Redeploy / restart `next dev` |
 | Users lost after deploy | SQLite on ephemeral disk | Expected until Postgres migration |
 
@@ -963,8 +971,8 @@ Add content under `tutor-frontend/src/content/curriculum/class10/mathematics/cha
 | Backend | FastAPI, Uvicorn | HTTP + WebSocket server |
 | Voice orchestration | Pipecat 1.5 | Real-time frame pipeline |
 | STT | Sarvam (`saaras:v3`) | Speech recognition |
-| LLM (primary) | Cerebras (`gpt-oss-120b`) | Tutor reasoning |
-| LLM (fallback) | Groq (`openai/gpt-oss-120b`) | Rate-limit failover |
+| LLM (primary) | OpenAI (`gpt-5.6-luna`, `LLM_PROVIDER=openai`) | Tutor reasoning |
+| LLM (optional) | Groq / Gemini / OpenRouter | Manual `LLM_PROVIDER` switch |
 | TTS | Cartesia (`sonic-3.5`) | Speech synthesis |
 | VAD | Silero (via Pipecat) | Speech detection |
 | Turn detection | LocalSmartTurnAnalyzerV3 | End-of-turn |
@@ -976,7 +984,7 @@ Add content under `tutor-frontend/src/content/curriculum/class10/mathematics/cha
 
 ## 30. License & credits
 
-Built on [Pipecat](https://github.com/pipecat-ai/pipecat) with [Sarvam](https://www.sarvam.ai/), [Cerebras](https://cerebras.ai/), [Groq](https://groq.com/), and [Cartesia](https://cartesia.ai/).
+Built on [Pipecat](https://github.com/pipecat-ai/pipecat) with [Sarvam](https://www.sarvam.ai/), [OpenAI](https://openai.com/), and [Cartesia](https://cartesia.ai/).
 
 ---
 

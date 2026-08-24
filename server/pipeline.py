@@ -32,6 +32,7 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver
 # -- Services
 from services.sarvam_stt import ReconnectingSarvamSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from services.tts_failover import CartesiaTTSWithFailover, build_fallback_tts
 
 # -- Transport
 from pipecat.transports.websocket.fastapi import (
@@ -41,11 +42,14 @@ from pipecat.transports.websocket.fastapi import (
 
 # -- Config and custom processors
 from config import (
-    CEREBRAS_API_KEY,
-    CEREBRAS_API_KEY_2,
     GROQ_API_KEY,
+    GEMINI_API_KEY,
+    OPENAI_API_KEY,
+    OPENROUTER_API_KEY,
+    LLM_PROVIDER,
     SARVAM_API_KEY,
     CARTESIA_API_KEY,
+    CARTESIA_TTS_MODEL,
     LLM_MODEL,
     SAMPLE_RATE,
     DEFAULT_SESSION_LANGUAGE,
@@ -53,6 +57,20 @@ from config import (
     LANGUAGE_MIN_CONFIDENCE,
     LANGUAGE_CONFIRMATIONS,
     RNNOISE_ENABLED,
+    VAD_START_SECS,
+    VAD_STOP_SECS,
+    STT_KEEPALIVE_TIMEOUT_SECS,
+    STT_KEEPALIVE_INTERVAL_SECS,
+    SARVAM_MIN_SPEECH_FRAMES,
+    SARVAM_NEGATIVE_FRAMES_COUNT,
+    SARVAM_NEGATIVE_FRAMES_WINDOW,
+    SARVAM_PRE_SPEECH_PAD_FRAMES,
+    AUDIO_GATE_DECAY_SECS,
+    SILENCE_THRESHOLD_SECS,
+    MEDIUM_SILENCE_THRESHOLD_SECS,
+    LONG_SILENCE_THRESHOLD_SECS,
+    USER_TURN_STOP_TIMEOUT_SECS,
+    LLM_EMPTY_GUARD_TIMEOUT_SECS,
     collect_pipeline_metrics,
 )
 from languages import (
@@ -61,8 +79,8 @@ from languages import (
     normalize_session_lang,
     to_cartesia_language,
 )
-from services.failover_llm import FailoverLLMService
 from serializers.raw_pcm import RawPCMSerializer
+from processors.reasoning_strip import ReasoningStripProcessor
 from processors.pivot_detector import PivotDetectorProcessor
 from processors.naturalizer import ResponseNaturalizerProcessor
 from processors.context_sanitizer import ContextSanitizerProcessor
@@ -141,13 +159,15 @@ async def create_pipeline(
     vad_turn_start = VADUserTurnStartStrategy()
     logger.info("Turn strategies created | session_id={}", sid)
 
-    # Silero VAD — required for barge-in detection and audio gate
+    # Silero VAD — barge-in + turn start. stop_secs must stay ≥ Sarvam's
+    # negative_frames silence, or STT finalizes mid-pause and the aggregator
+    # treats each fragment as a finished turn.
     vad = VADProcessor(
         vad_analyzer=SileroVADAnalyzer(
             params=VADParams(
                 confidence=0.6,
-                start_secs=0.2,
-                stop_secs=0.5,
+                start_secs=VAD_START_SECS,
+                stop_secs=VAD_STOP_SECS,
                 min_volume=0.7,
             )
         ),
@@ -160,64 +180,112 @@ async def create_pipeline(
         model="saaras:v3",
         mode="transcribe",
         sample_rate=SAMPLE_RATE,
-        keepalive_timeout=15.0,
-        keepalive_interval=5.0,
+        keepalive_timeout=STT_KEEPALIVE_TIMEOUT_SECS,
+        keepalive_interval=STT_KEEPALIVE_INTERVAL_SECS,
         settings=ReconnectingSarvamSTTService.Settings(
             language="unknown",
-            # Pipecat Silero VAD owns turn boundaries; Sarvam only transcribes + flush.
+            # Pipecat Silero VAD owns turn boundaries (flush on VAD stop).
+            # Keep vad_signals=False so Sarvam does not emit a second
+            # UserStoppedSpeakingFrame stream. Fine-grained VAD still
+            # controls when Sarvam emits a `data` transcript — defaults
+            # (18 frames ≈ 0.58s) split slow speech; align with stop_secs.
             vad_signals=False,
+            min_speech_frames=SARVAM_MIN_SPEECH_FRAMES,  # ~192ms before a segment starts
+            negative_frames_count=SARVAM_NEGATIVE_FRAMES_COUNT,  # ~1.12s silence to end a segment
+            negative_frames_window=SARVAM_NEGATIVE_FRAMES_WINDOW,  # lookback (~1.54s)
+            pre_speech_pad_frames=SARVAM_PRE_SPEECH_PAD_FRAMES,  # ~512ms kept before speech onset
         ),
     )
     logger.info("STT service created | session_id={} auto_language=true", sid)
 
-    # -- LLM (Cerebras primary, auto-failover on rate limits / errors)
-    # A second Cerebras key is tried first: same provider, same model, separate
-    # rate-limit bucket, so a "queue_exceeded" burst costs nothing extra.
-    llm_fallbacks = []
-    if CEREBRAS_API_KEY_2:
-        llm_fallbacks.append(
-            {
-                "name": "Cerebras-2",
-                "api_key": CEREBRAS_API_KEY_2,
-                "base_url": "https://api.cerebras.ai/v1",
-                "model": LLM_MODEL,
-            }
+    # -- LLM (provider: openai | openrouter | gemini | groq)
+    # Import the selected provider here so unused extras (Google Gemini,
+    # etc.) are not required just to load the app or run tests.
+    if LLM_PROVIDER == "openai":
+        from services.openai_llm import OpenAILLMTutorService
+
+        llm = OpenAILLMTutorService(
+            api_key=OPENAI_API_KEY,
+            settings=OpenAILLMTutorService.Settings(
+                model=LLM_MODEL,
+                max_completion_tokens=512,
+            ),
         )
-    if GROQ_API_KEY:
-        llm_fallbacks.append(
-            {
-                "name": "Groq",
-                "api_key": GROQ_API_KEY,
-                "base_url": "https://api.groq.com/openai/v1",
-                "model": "openai/gpt-oss-120b",
-            }
+        logger.info(
+            "LLM Service: OpenAI — model: {} | session_id={}",
+            LLM_MODEL,
+            sid,
         )
-    llm = FailoverLLMService(
-        api_key=CEREBRAS_API_KEY,
-        fallbacks=llm_fallbacks,
-        settings=FailoverLLMService.Settings(
-            model=LLM_MODEL,
-            temperature=0.6,
-            max_completion_tokens=384,
-            extra={"reasoning_effort": "low"},
-        ),
-    )
-    logger.info(
-        "LLM service created | session_id={} fallbacks={}",
-        sid,
-        [f["name"] for f in llm_fallbacks],
-    )
+    elif LLM_PROVIDER == "openrouter":
+        from services.openrouter_llm import OpenRouterLLMService
+
+        llm = OpenRouterLLMService(
+            api_key=OPENROUTER_API_KEY,
+            settings=OpenRouterLLMService.Settings(
+                model=LLM_MODEL,
+                temperature=0.6,
+                max_tokens=512,
+                extra={"reasoning": {"enabled": True}},
+            ),
+        )
+        logger.info(
+            "LLM Service: OpenRouter — model: {} | session_id={}",
+            LLM_MODEL,
+            sid,
+        )
+    elif LLM_PROVIDER == "gemini":
+        from services.gemini_llm import GeminiTutorLLMService
+
+        llm = GeminiTutorLLMService(
+            api_key=GEMINI_API_KEY,
+            settings=GeminiTutorLLMService.Settings(
+                model=LLM_MODEL,
+                temperature=0.6,
+                max_tokens=512,
+                thinking=GeminiTutorLLMService.ThinkingConfig(
+                    thinking_budget=0,
+                    include_thoughts=False,
+                ),
+            ),
+        )
+        logger.info(
+            "LLM Service: Gemini — model: {} | session_id={}",
+            LLM_MODEL,
+            sid,
+        )
+    else:
+        from services.groq_llm import GroqReasoningLLMService
+
+        llm = GroqReasoningLLMService(
+            api_key=GROQ_API_KEY,
+            settings=GroqReasoningLLMService.Settings(
+                model=LLM_MODEL,
+                temperature=0.6,
+                max_completion_tokens=384,
+                extra={
+                    "reasoning_effort": "low",
+                    "include_reasoning": False,
+                },
+            ),
+        )
+        logger.info(
+            "LLM Service: Groq — model: {} | session_id={}",
+            LLM_MODEL,
+            sid,
+        )
 
     # -- TTS (Cartesia Sonic — language via Settings so mid-session updates work)
-    tts = CartesiaTTSService(
+    tts = CartesiaTTSWithFailover(
         api_key=CARTESIA_API_KEY,
         sample_rate=SAMPLE_RATE,
         voice_id=tts_voice_id,
         settings=CartesiaTTSService.Settings(
             voice=tts_voice_id,
-            model="sonic-3.5",
+            model=CARTESIA_TTS_MODEL,
             language=to_cartesia_language(initial_lang),
         ),
+        fallback=build_fallback_tts(sample_rate=SAMPLE_RATE),
+        session_id=sid,
     )
     logger.info(
         "TTS service created | session_id={} language={} voice={} ({})",
@@ -228,10 +296,11 @@ async def create_pipeline(
     )
 
     # -- Custom processors
+    reasoning_strip = ReasoningStripProcessor()
     pivot_detector = PivotDetectorProcessor()
-    llm_empty_guard = LLMEmptyGuardProcessor(timeout_secs=8.0)
+    llm_empty_guard = LLMEmptyGuardProcessor(timeout_secs=LLM_EMPTY_GUARD_TIMEOUT_SECS)
 
-    audio_gate = AudioGateProcessor(barge_in_rms=0.04, decay_secs=0.35)
+    audio_gate = AudioGateProcessor(barge_in_rms=0.04, decay_secs=AUDIO_GATE_DECAY_SECS)
     denoiser = RNNoiseDenoiserProcessor(
         pipeline_sample_rate=SAMPLE_RATE,
         enabled=RNNOISE_ENABLED,
@@ -239,9 +308,9 @@ async def create_pipeline(
     )
 
     silence_detector = SilenceDetectorProcessor(
-        silence_threshold_secs=15.0,
-        medium_silence_threshold_secs=120.0,
-        long_silence_threshold_secs=300.0,
+        silence_threshold_secs=SILENCE_THRESHOLD_SECS,
+        medium_silence_threshold_secs=MEDIUM_SILENCE_THRESHOLD_SECS,
+        long_silence_threshold_secs=LONG_SILENCE_THRESHOLD_SECS,
     )
 
     break_store = BreakStore()
@@ -291,7 +360,7 @@ async def create_pipeline(
                 start=[vad_turn_start],
                 stop=[smart_turn_stop],
             ),
-            user_turn_stop_timeout=3.0,
+            user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT_SECS,
         ),
         assistant_params=LLMAssistantAggregatorParams(),
     )
@@ -318,11 +387,14 @@ async def create_pipeline(
         # LanguageTracker is upstream, so its active language is fresh for this
         # turn; the directive reasserts the reply language on every turn.
         get_language=lambda: language_tracker.current_language,
+        get_script=lambda: language_tracker.current_script,
     )
     text_input = TextInputProcessor(
         store=session_store,
         llm_context=context,
         session_id=sid,
+        # Typed chat never hits STT, so the tracker must see these utterances too.
+        observe_language=language_tracker.observe_utterance,
     )
     # After text_input / user aggregator so voice and typed turns share one
     # intercept. Not on the PCM / VAD / STT path. Safety runs first so a
@@ -373,6 +445,7 @@ async def create_pipeline(
             llm_inference_dedup,
             pivot_detector,
             llm,
+            reasoning_strip,
             naturalizer,
             incidental_capture,
             llm_empty_guard,

@@ -2,24 +2,10 @@ import { NextResponse } from "next/server";
 
 import { passwordPolicyError, emailLooksValid } from "@/lib/auth/passwordPolicy";
 import {
-  BOOTSTRAP_ACCESS_TTL_SECS,
-  bootstrapTokens,
-  isBootstrapCredentials,
-} from "@/lib/server/bootstrapAuth";
-import {
   applyAuthCookies,
   backendJson,
   csrfAllowed,
 } from "@/lib/server/session";
-
-function bootstrapSignupResponse(): NextResponse | null {
-  const tokens = bootstrapTokens();
-  if (!tokens) return null;
-  const response = NextResponse.json({ ok: true });
-  return applyAuthCookies(response, tokens, {
-    accessMaxAge: BOOTSTRAP_ACCESS_TTL_SECS,
-  });
-}
 
 export async function POST(request: Request) {
   if (!csrfAllowed(request)) {
@@ -46,10 +32,6 @@ export async function POST(request: Request) {
   if (passwordPolicyError(password)) {
     return NextResponse.json({ error: "weak_password" }, { status: 400 });
   }
-  if (isBootstrapCredentials(email, password)) {
-    const seeded = bootstrapSignupResponse();
-    if (seeded) return seeded;
-  }
   const { status, body: data } = await backendJson("/auth/signup", {
     method: "POST",
     body: JSON.stringify({ email, password }),
@@ -62,8 +44,12 @@ export async function POST(request: Request) {
       data && typeof data === "object" && "detail" in data
         ? String((data as { detail: unknown }).detail)
         : "could_not_create";
+    const error =
+      detail === "weak_password" || detail === "check_your_email"
+        ? detail
+        : "could_not_create";
     return NextResponse.json(
-      { error: detail === "weak_password" ? "weak_password" : "could_not_create" },
+      { error },
       { status: status >= 400 ? status : 400 },
     );
   }

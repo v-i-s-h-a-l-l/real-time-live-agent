@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 from loguru import logger
 from pipecat.frames.frames import (
@@ -29,31 +28,13 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from processors.llm_context_text import _last_user_text
 from processors.session_context import SessionContextStore
 from security import redact_utterance
 from tutor.breaks import BreakPhase, BreakStore, BreakTurnResult
 
 _LLM_TURN_FRAMES = (LLMContextFrame, LLMRunFrame)
 _SHUTDOWN_FRAMES = (EndFrame, CancelFrame, StopFrame)
-
-
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = msg.get("content")
-        if isinstance(content, list):
-            text = " ".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("text")
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if text:
-            return text
-    return ""
 
 
 def drop_last_user_message(context: LLMContext) -> bool:
@@ -88,6 +69,7 @@ class StudyBreakProcessor(FrameProcessor):
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._last_handled: str = ""
+        self._last_spoken: str = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -107,10 +89,12 @@ class StudyBreakProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # A second LLMContextFrame for the same already-handled turn must not
-        # start another timer or re-speak the acknowledgement.
+        # A second LLMRunFrame for the same already-handled turn must not
+        # start another timer or re-speak the acknowledgement. A new
+        # LLMContextFrame with different student text must always re-evaluate.
         if (
-            utterance == self._last_handled
+            isinstance(frame, LLMRunFrame)
+            and utterance == self._last_handled
             and self._store.state.phase != BreakPhase.IDLE
         ):
             return
@@ -120,7 +104,26 @@ class StudyBreakProcessor(FrameProcessor):
             self._last_handled = ""
             await self.push_frame(frame, direction)
             return
+
+        spoken = (result.spoken or "").strip()
+        if spoken and spoken == self._last_spoken:
+            logger.error(
+                "[StudyBreak] identical spoken reply blocked session={} text={!r}",
+                self._session_id,
+                spoken[:80],
+            )
+            if self._store.state.phase in (
+                BreakPhase.REQUESTING_DURATION,
+                BreakPhase.OFFERING_MAX,
+            ):
+                self._store.clear_negotiation()
+            self._last_handled = ""
+            await self.push_frame(frame, direction)
+            return
+
         self._last_handled = utterance
+        if spoken:
+            self._last_spoken = spoken
 
         logger.info(
             "[StudyBreak] session={} phase={} swallow={} event={} utterance={}",

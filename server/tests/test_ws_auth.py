@@ -34,7 +34,7 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setattr(config, "REDIS_URL", "")
     monkeypatch.setattr(config, "_REQUIRED_KEYS", {
         "SARVAM_API_KEY": "s",
-        "CEREBRAS_API_KEY": "c",
+        "GROQ_API_KEY": "g",
         "CARTESIA_API_KEY": "t",
     })
     reset_store_for_tests(db)

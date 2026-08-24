@@ -5,15 +5,18 @@ Tracks whether the user is on a phone/side call.
 - When user says they're stepping away / taking a call → mutes pipeline (drops all frames silently)
 - While muted → all TranscriptionFrames are silently dropped, no LLM is triggered
 - When user says re-engagement phrase → unmutes and lets frames through normally
+- Auto-unmutes after CALL_MUTE_TIMEOUT_SECS, or on a substantial lesson utterance
 
 Place this in the pipeline AFTER stt (TranscriptionFrame) and BEFORE user_aggregator.
 """
 
 import re
+import time
 from collections.abc import Callable
 
 from loguru import logger
 
+import config
 from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
@@ -50,7 +53,7 @@ UNMUTE_PATTERNS = [
     r"\b(?:done|finished)\s+with\s+(?:the\s+|my\s+)?(?:call|phone)\b",
     r"\b(?:call|phone)\s+(?:is\s+)?(?:over|done|finished)\b",
     r"\bare\s+you\s+(there|here|still there|still here|listening)\b",
-    r"\b(ministros|ministro|assistant)\s*(are\s+you)?\s*(there|here|back)?\b",
+    r"\bassistant\s*(are\s+you)?\s*(there|here|back)?\b",
     r"\bsorry\s+(about\s+that|for\s+that|to\s+keep\s+you)\b",
     r"\bback\s+at\s+it\b",
     r"\bwhere\s+were\s+we\b",
@@ -63,10 +66,46 @@ UNMUTE_PATTERNS = [
 
 _MUTE_RE = [re.compile(p, re.IGNORECASE) for p in MUTE_PATTERNS]
 _UNMUTE_RE = [re.compile(p, re.IGNORECASE) for p in UNMUTE_PATTERNS]
+_WORD_RE = re.compile(r"[A-Za-z0-9']+")
+_FILLER_WORDS = frozenset(
+    {
+        "uh",
+        "um",
+        "umm",
+        "uhh",
+        "er",
+        "ah",
+        "hmm",
+        "hm",
+        "mm",
+        "mhm",
+        "ok",
+        "okay",
+        "yeah",
+        "yes",
+        "yep",
+        "no",
+        "nope",
+        "right",
+        "wait",
+        "like",
+        "so",
+    }
+)
 
 
 def _matches(text: str, patterns: list) -> bool:
     return any(p.search(text) for p in patterns)
+
+
+def _looks_like_lesson_utterance(text: str, *, min_words: int) -> bool:
+    """True for a real tutoring turn, not a filler or another hold-on."""
+    if _matches(text, _MUTE_RE):
+        return False
+    words = [w.lower() for w in _WORD_RE.findall(text)]
+    if len(words) < min_words:
+        return False
+    return any(word not in _FILLER_WORDS for word in words)
 
 
 class CallMuteProcessor(FrameProcessor):
@@ -77,32 +116,61 @@ class CallMuteProcessor(FrameProcessor):
     ------
     unmuted (default) — all frames pass through normally
     muted             — TranscriptionFrames are silently dropped; a
-                        re-engagement phrase flips back to unmuted and the
-                        transcription carrying it is passed on, so the tutor
-                        answers it as an ordinary turn.
+                        re-engagement phrase, a substantial lesson utterance,
+                        or CALL_MUTE_TIMEOUT_SECS flips back to unmuted.
     """
 
-    def __init__(self, should_skip_mute: Callable[[str], bool] | None = None, **kwargs):
+    def __init__(
+        self,
+        should_skip_mute: Callable[[str], bool] | None = None,
+        *,
+        now: Callable[[], float] | None = None,
+        timeout_secs: float | None = None,
+        resume_min_words: int | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._muted = False
+        self._muted_at: float | None = None
         self._should_skip_mute = should_skip_mute
+        self._now = now or time.monotonic
+        self._timeout_secs = (
+            float(timeout_secs)
+            if timeout_secs is not None
+            else float(config.CALL_MUTE_TIMEOUT_SECS)
+        )
+        self._resume_min_words = (
+            resume_min_words
+            if resume_min_words is not None
+            else config.CALL_MUTE_RESUME_MIN_WORDS
+        )
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
     def _set_muted(self, reason: str):
         if not self._muted:
             self._muted = True
+            self._muted_at = self._now()
             logger.info("CallMuteProcessor: MUTED — {}", reason)
 
     def _set_unmuted(self, reason: str):
         if self._muted:
             self._muted = False
+            self._muted_at = None
             logger.info("CallMuteProcessor: UNMUTED — {}", reason)
+
+    def _timeout_reached(self) -> bool:
+        if not self._muted or self._muted_at is None:
+            return False
+        return (self._now() - self._muted_at) >= self._timeout_secs
 
     # ── Frame handler ────────────────────────────────────────────────────────
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
+        if self._timeout_reached():
+            self._set_unmuted(f"timeout after {self._timeout_secs}s")
 
         if not isinstance(frame, TranscriptionFrame):
             # All non-transcription frames (audio, control, etc.) always pass
@@ -135,6 +203,11 @@ class CallMuteProcessor(FrameProcessor):
                 self._set_unmuted(f"re-engagement='{text}'")
                 # Push the re-engagement utterance through so the LLM
                 # can respond naturally ("Welcome back! Where were we?")
+                await self.push_frame(frame, direction)
+            elif _looks_like_lesson_utterance(
+                text, min_words=self._resume_min_words
+            ):
+                self._set_unmuted(f"lesson utterance='{text}'")
                 await self.push_frame(frame, direction)
             else:
                 # Silently drop — background call audio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -15,12 +16,50 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from processors.session_context import SessionContextStore, upsert_context_system_note
+from processors.llm_context_text import _last_user_text
+from processors.session_context import (
+    SessionContextStore,
+    _LEARNING_MARKER,
+    _SESSION_MARKER,
+    _learning_note,
+    _system_note,
+    conversational_learning_note,
+    conversational_session_note,
+    scoped_learning_note,
+    scoped_session_note,
+    upsert_context_system_note,
+)
 from protocol import SERVER_PRACTICE_PROGRESS
 from tutor.engine import TutorEngine
 from tutor.intent import is_interrupt_style
 from tutor.prompts import TUTOR_TURN_MARKER, build_tutor_turn_directive
+from tutor.steer import STEER_NOTE_PREFIX, SteerAction
 from tutor.types import TutorState
+
+# Steer actions where the reply is entirely about the *student's* state — the
+# lesson identity has no place in the response. The persistent context notes
+# are fully stripped.
+_WITHHELD_STEER_ACTIONS: frozenset[str] = frozenset(
+    {
+        SteerAction.GRANT_PAUSE.value,
+        SteerAction.CONFIRM_PAUSE.value,
+        SteerAction.GRANT_LEAVE.value,
+        SteerAction.JOKE_BEAT.value,
+        SteerAction.CONFIRM_DONE.value,
+    }
+)
+
+# Steer actions where the reply *needs* to name what we're on to hold the
+# line. Formulas/visible content are stripped, but the topic anchor stays.
+_SCOPED_STEER_ACTIONS: frozenset[str] = frozenset(
+    {
+        SteerAction.DEFER_LIGHT.value,
+        SteerAction.FINISH_THEN_PAUSE.value,
+        SteerAction.HOLD_FIRM.value,
+        SteerAction.HOLD_SCOPE.value,
+        SteerAction.CHECK_IN.value,
+    }
+)
 
 
 class TutorTurnProcessor(FrameProcessor):
@@ -35,6 +74,7 @@ class TutorTurnProcessor(FrameProcessor):
         engine: TutorEngine | None = None,
         state: TutorState | None = None,
         get_language: Callable[[], str] | None = None,
+        get_script: Callable[[], str] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -43,9 +83,12 @@ class TutorTurnProcessor(FrameProcessor):
         self._session_id = session_id
         self._engine = engine or TutorEngine()
         self._state = state or TutorState()
+        if self._state.session_started_at is None:
+            self._state.session_started_at = time.monotonic()
         # Reads the LanguageTracker's active language (single source of truth),
         # which the upstream tracker has already updated for this turn.
         self._get_language = get_language
+        self._get_script = get_script
         self._last_turn_key = ""
 
     @property
@@ -100,6 +143,7 @@ class TutorTurnProcessor(FrameProcessor):
         )
         practice = self._engine.practice_snapshot()
         active_language = self._get_language() if self._get_language else None
+        reply_script = self._get_script() if self._get_script else None
         directive = build_tutor_turn_directive(
             decision=decision,
             state=self._state,
@@ -108,7 +152,19 @@ class TutorTurnProcessor(FrameProcessor):
             utterance=utterance,
             practice=practice,
             active_language=active_language,
+            reply_script=reply_script,
         )
+
+        # A conversational turn (grant_pause, finish_then_pause, defer_light,
+        # hold_firm, hold_scope, joke_beat, grant_leave) must not have the slide
+        # identity within reach. If [LEARNING_CONTEXT] still names the topic
+        # and lists formulas above, the model reliably tacks
+        # "Let's stay on Euclid's Division Lemma" onto a reply that should just
+        # let the student step away. Swap the persistent context notes for a
+        # stripped placeholder for this one turn, and re-render the full notes
+        # on the next teaching turn from what the store still holds.
+        self._apply_context_scope(decision)
+
         # Last message before generation: the turn's language and teaching
         # instruction has to outrank the English-heavy history above it.
         upsert_context_system_note(
@@ -140,23 +196,56 @@ class TutorTurnProcessor(FrameProcessor):
         return {"type": SERVER_PRACTICE_PROGRESS, **practice.to_payload()}
 
 
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = msg.get("content")
-        if isinstance(content, list):
-            text = " ".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("text")
+    def _apply_context_scope(self, decision) -> None:
+        """Rewrite [LEARNING_CONTEXT]/[SESSION_CONTEXT] for the current turn.
+
+        Three modes, one per turn:
+
+        * WITHHELD — pure student-state (grant_pause / grant_leave / joke_beat):
+          strip everything so no lesson identity leaks into a "go grab food"
+          reply.
+        * SCOPE-ONLY — scope-holding (hold_scope / hold_firm / defer_light /
+          finish_then_pause): keep the topic and section name so the redirect
+          can say "we're on Euclid's Division Lemma, that's later", but drop
+          the slide text, formulas, and Next-step invitation so it does not
+          also teach the concept.
+        * FULL — teaching turns and resume_lesson: re-render the full notes
+          straight from the client-supplied stores.
+        """
+        steer_action = None
+        for note in decision.notes:
+            if note.startswith(STEER_NOTE_PREFIX):
+                steer_action = note[len(STEER_NOTE_PREFIX):]
+                break
+
+        if steer_action in _WITHHELD_STEER_ACTIONS:
+            upsert_context_system_note(
+                self._llm_context, _LEARNING_MARKER, conversational_learning_note()
             )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if text:
-            return text
-    return ""
+            upsert_context_system_note(
+                self._llm_context, _SESSION_MARKER, conversational_session_note()
+            )
+            return
+
+        if steer_action in _SCOPED_STEER_ACTIONS:
+            learning_ctx = self._store.learning_context or {}
+            session_ctx = self._store.context or {}
+            upsert_context_system_note(
+                self._llm_context, _LEARNING_MARKER, scoped_learning_note(learning_ctx)
+            )
+            upsert_context_system_note(
+                self._llm_context, _SESSION_MARKER, scoped_session_note(session_ctx)
+            )
+            return
+
+        if self._store.learning_context:
+            upsert_context_system_note(
+                self._llm_context, _LEARNING_MARKER, _learning_note(self._store.learning_context)
+            )
+        if self._store.context:
+            upsert_context_system_note(
+                self._llm_context, _SESSION_MARKER, _system_note(self._store.context)
+            )
 
 
 def _log_llm_tutor_context(

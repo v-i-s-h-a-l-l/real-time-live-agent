@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mintAccessJwt, verifyAccessJwt } from "@/lib/server/jwt";
-import { createHmac } from "crypto";
+import { createHmac } from "node:crypto";
 
 const SECRET = "test-auth-secret-value-32chars-min";
 

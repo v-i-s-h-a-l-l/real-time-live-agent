@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import Any
 
 from loguru import logger
 from pipecat.frames.frames import (
@@ -31,6 +30,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from languages import LANG_EN
+from processors.llm_context_text import _last_user_text
 from processors.session_context import SessionContextStore, upsert_context_system_note
 from tutor.safety import (
     SAFETY_CONTEXT_MARKER,
@@ -44,25 +44,6 @@ from tutor.safety import (
 # or the math LLM still answers.
 _LLM_TURN_FRAMES = (LLMContextFrame, LLMMessagesAppendFrame, LLMRunFrame)
 _SHUTDOWN_FRAMES = (EndFrame, CancelFrame, StopFrame)
-
-
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for msg in reversed(messages):
-        if msg.get("role") != "user":
-            continue
-        content = msg.get("content")
-        if isinstance(content, list):
-            text = " ".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("text")
-            )
-        else:
-            text = str(content or "")
-        text = text.strip()
-        if text:
-            return text
-    return ""
 
 
 def _utterance_from_turn(frame: Frame, context: LLMContext) -> str:

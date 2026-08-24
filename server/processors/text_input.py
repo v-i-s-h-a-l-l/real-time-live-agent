@@ -7,6 +7,7 @@ path runs.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
@@ -54,12 +55,14 @@ class TextInputProcessor(FrameProcessor):
         llm_context: LLMContext,
         *,
         session_id: str = "-",
+        observe_language: Callable[..., Awaitable[None]] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._store = store
         self._llm_context = llm_context
         self._session_id = session_id
+        self._observe_language = observe_language
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -83,6 +86,8 @@ class TextInputProcessor(FrameProcessor):
                 self._store.skip_tts_next_response = not speak
                 await self.broadcast_interruption()
                 self._llm_context.add_message({"role": "user", "content": text})
+                if self._observe_language is not None:
+                    await self._observe_language(text)
                 await self.push_frame(
                     LLMContextFrame(context=self._llm_context),
                     direction,

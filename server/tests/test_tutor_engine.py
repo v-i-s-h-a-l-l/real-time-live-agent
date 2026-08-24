@@ -162,7 +162,7 @@ def test_acknowledgement_does_not_reset_confusion_or_lecture():
     state = TutorState(phase="learning")
     engine.decide("I don't understand", state)
     assert state.confusion_streak == 1
-    d = engine.decide("Okay.", state)
+    d = engine.decide("Right.", state)
     assert d.mode == TeachingMode.ACKNOWLEDGE
     assert d.response_length.value == "micro"
     assert d.check_understanding is False
@@ -197,19 +197,24 @@ def test_success_is_brief():
     assert d.check_understanding is False
 
 
-def test_boredom_does_not_socratic_the_same_question():
+def test_boredom_changes_method_not_socratic_same_question():
     engine = TutorEngine()
     state = TutorState(phase="practice", current_question_id="q1")
     d = engine.decide("This is very boring.", state)
     assert d.intent == StudentIntent.DISENGAGEMENT
-    assert d.mode == TeachingMode.LEARN
-    assert d.move.value == "shorten"
+    # Boredom now switches teaching method (example/analogy), not just shortens.
+    assert d.mode == TeachingMode.CLARIFY
+    assert d.move.value == "give_example"
+    assert d.mode != TeachingMode.REDIRECT  # stays on topic
     assert d.allow_reveal_answer is True
     assert d.check_understanding is False
     assert d.use_next_hint is False
-    assert "never use textbook" in d.strategy.lower()
+    assert "no textbook or answer-key phrasing" in d.strategy.lower()
     assert "same question" in d.strategy.lower()
-    assert state.depth_preference == "short"
+    assert "example" in d.strategy.lower() or "analogy" in d.strategy.lower()
+    # Boredom must not leave a standing "be terse" preference behind — that is
+    # what made every later turn compress the same definition.
+    assert state.depth_preference == "beginner"
     skip = engine.decide("I don't want to do this", TutorState(phase="practice"))
     assert skip.intent == StudentIntent.DISENGAGEMENT
     assert "do not insist" in skip.strategy.lower() or "leave this problem" in skip.strategy.lower()
@@ -218,13 +223,13 @@ def test_boredom_does_not_socratic_the_same_question():
 def test_ack_directive_forbids_follow_up_and_sets_length():
     engine = TutorEngine()
     state = TutorState(phase="learning", topic_title="Discriminant")
-    decision = engine.decide("Okay.", state)
+    decision = engine.decide("Right.", state)
     directive = build_tutor_turn_directive(
         decision=decision,
         state=state,
         learning_context={"phase": "learning", "sectionTitle": "Discriminant", "visibleContent": "b² − 4ac"},
         tutor_context=None,
-        utterance="Okay.",
+        utterance="Right.",
     )
     assert "Response length: micro" in directive
     assert "Do not add a follow-up question this turn" in directive

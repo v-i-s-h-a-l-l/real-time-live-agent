@@ -33,6 +33,29 @@ def test_confusion():
     assert detect_intent("I don't understand.") == StudentIntent.CONFUSION
 
 
+def test_confusion_hinglish_roman():
+    assert detect_intent("bahut mushkil hai yaar") == StudentIntent.CONFUSION
+    assert detect_intent("mujhe samajh nahi aa raha") == StudentIntent.CONFUSION
+    assert detect_intent("kathin hai") == StudentIntent.CONFUSION
+
+
+def test_confusion_tanglish_roman():
+    assert detect_intent("idhu kashtama irukku") == StudentIntent.CONFUSION
+    assert detect_intent("puriyala saar") == StudentIntent.CONFUSION
+    assert detect_intent("kadinamaana") == StudentIntent.CONFUSION
+
+
+def test_confusion_tenglish_roman():
+    assert detect_intent("artham kavatledu") == StudentIntent.CONFUSION
+    assert detect_intent("chala kashtam ga undi") == StudentIntent.CONFUSION
+
+
+def test_confusion_native_scripts():
+    assert detect_intent("यह बहुत मुश्किल है") == StudentIntent.CONFUSION
+    assert detect_intent("இது கஷ்டம்") == StudentIntent.CONFUSION
+    assert detect_intent("అర్థం కాలేదు") == StudentIntent.CONFUSION
+
+
 def test_why_how():
     assert detect_intent("Why do we use the quadratic formula?") == StudentIntent.WHY_HOW
 
@@ -72,6 +95,8 @@ def test_student_answer_numeric():
 
 def test_acknowledgement():
     assert detect_intent("okay") == StudentIntent.ACKNOWLEDGEMENT
+    assert detect_intent("yes ready") == StudentIntent.ACKNOWLEDGEMENT
+    assert detect_intent("yes ready", phase="practice") == StudentIntent.ACKNOWLEDGEMENT
 
 
 def test_hesitation_hmm():
@@ -96,6 +121,11 @@ def test_keep_it_short():
 
 def test_greeting():
     assert detect_intent("Hi there") == StudentIntent.GREETING
+
+
+def test_how_are_you_is_greeting_not_a_lesson_question():
+    assert detect_intent("how are you") == StudentIntent.GREETING
+    assert detect_intent("How are you doing today?") == StudentIntent.GREETING
 
 
 def test_practice_request():

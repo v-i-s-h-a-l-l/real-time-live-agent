@@ -20,7 +20,7 @@ from tutor.types import (  # noqa: E402
 # utterance, phase, intent, mode, move, length
 SUITE: list[tuple[str, str, StudentIntent, TeachingMode, ConversationMove, ResponseLength]] = [
     ("What is a quadratic equation?", "learning", StudentIntent.EXPLANATION, TeachingMode.LEARN, ConversationMove.EXPLAIN, ResponseLength.MEDIUM),
-    ("Okay.", "learning", StudentIntent.ACKNOWLEDGEMENT, TeachingMode.ACKNOWLEDGE, ConversationMove.ACKNOWLEDGE, ResponseLength.MICRO),
+    ("Okay.", "learning", StudentIntent.EXPLANATION, TeachingMode.LEARN, ConversationMove.EXPLAIN, ResponseLength.SHORT),
     ("Hmm.", "learning", StudentIntent.HESITATION, TeachingMode.ACKNOWLEDGE, ConversationMove.WAIT, ResponseLength.MICRO),
     ("Right.", "learning", StudentIntent.ACKNOWLEDGEMENT, TeachingMode.ACKNOWLEDGE, ConversationMove.ACKNOWLEDGE, ResponseLength.MICRO),
     ("I don't understand.", "learning", StudentIntent.CONFUSION, TeachingMode.CLARIFY, ConversationMove.SIMPLIFY, ResponseLength.SHORT),
@@ -41,19 +41,19 @@ SUITE: list[tuple[str, str, StudentIntent, TeachingMode, ConversationMove, Respo
     ("Oh, I get it now.", "learning", StudentIntent.SUCCESS, TeachingMode.ACKNOWLEDGE, ConversationMove.CELEBRATE, ResponseLength.MICRO),
     ("I got it!", "learning", StudentIntent.SUCCESS, TeachingMode.ACKNOWLEDGE, ConversationMove.CELEBRATE, ResponseLength.MICRO),
     ("Where do we use this in real life?", "learning", StudentIntent.RELATED_EDUCATIONAL, TeachingMode.LEARN, ConversationMove.EXPLAIN, ResponseLength.SHORT),
-    ("What's the weather?", "learning", StudentIntent.UNRELATED, TeachingMode.REDIRECT, ConversationMove.REDIRECT, ResponseLength.MICRO),
-    ("Who won the cricket match?", "learning", StudentIntent.UNRELATED, TeachingMode.REDIRECT, ConversationMove.REDIRECT, ResponseLength.MICRO),
+    ("What's the weather?", "learning", StudentIntent.UNRELATED, TeachingMode.REDIRECT, ConversationMove.REDIRECT, ResponseLength.SHORT),
+    ("Who won the cricket match?", "learning", StudentIntent.UNRELATED, TeachingMode.REDIRECT, ConversationMove.REDIRECT, ResponseLength.SHORT),
     ("What is this?", "learning", StudentIntent.EXPLANATION, TeachingMode.LEARN, ConversationMove.ANSWER_DIRECT, ResponseLength.SHORT),
     ("Why is that needed?", "learning", StudentIntent.WHY_HOW, TeachingMode.CLARIFY, ConversationMove.ANSWER_DIRECT, ResponseLength.SHORT),
     ("Can you explain that second step?", "learning", StudentIntent.EXPLANATION, TeachingMode.LEARN, ConversationMove.EXPLAIN, ResponseLength.MEDIUM),
     ("Explain more.", "learning", StudentIntent.DEPTH_MORE, TeachingMode.LEARN, ConversationMove.DEEPEN, ResponseLength.MEDIUM),
     ("Keep it short.", "learning", StudentIntent.DEPTH_SHORT, TeachingMode.ACKNOWLEDGE, ConversationMove.SHORTEN, ResponseLength.MICRO),
     ("Give me a simpler example.", "learning", StudentIntent.DEPTH_SIMPLER, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
-    ("This is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
-    ("This problem is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("This is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
+    ("This problem is boring", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
     ("I don't want to do this", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
-    ("This is too tedious", "learning", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
-    ("I'm bored", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.LEARN, ConversationMove.SHORTEN, ResponseLength.SHORT),
+    ("This is too tedious", "learning", StudentIntent.DISENGAGEMENT, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
+    ("I'm bored", "practice", StudentIntent.DISENGAGEMENT, TeachingMode.CLARIFY, ConversationMove.GIVE_EXAMPLE, ResponseLength.MEDIUM),
 ]
 
 

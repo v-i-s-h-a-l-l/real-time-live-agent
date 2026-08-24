@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 import asyncio
 from contextlib import asynccontextmanager
@@ -22,7 +23,7 @@ from config import (
     missing_required_keys,
     production_blockers,
 )
-from opening import opening_system_message
+from opening import opening_turn_messages
 from ops_log import ops_event
 from pipeline import create_pipeline
 from protocol import CLIENT_AUTH, SERVER_AUTH_OK
@@ -201,7 +202,7 @@ async def ready():
 async def websocket_endpoint(websocket: WebSocket):
     session_id = str(uuid.uuid4())
     client_host = websocket.client.host if websocket.client else "unknown"
-    opened_at = asyncio.get_event_loop().time()
+    opened_at = time.monotonic()
 
     if missing_required_keys() or production_blockers():
         ops_event(
@@ -293,7 +294,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "voice_session_ready",
                 session_id=session_id,
                 category="voice",
-                duration_ms=int((asyncio.get_event_loop().time() - opened_at) * 1000),
+                duration_ms=int((time.monotonic() - opened_at) * 1000),
             )
             # Allow the client to deliver session_context before the first LLM turn.
             waited = 0.0
@@ -303,9 +304,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await asyncio.sleep(_SESSION_CONTEXT_POLL_SECS)
                 waited += _SESSION_CONTEXT_POLL_SECS
 
-            context.add_message(
-                {"role": "system", "content": opening_system_message(session_store)}
-            )
+            for message in opening_turn_messages(session_store):
+                context.add_message(message)
             await task.queue_frames([LLMContextFrame(context=context)])
 
         @transport.event_handler("on_client_disconnected")
@@ -318,7 +318,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_id=session_id,
                 category="websocket",
                 reason="client_disconnected",
-                duration_ms=int((asyncio.get_event_loop().time() - opened_at) * 1000),
+                duration_ms=int((time.monotonic() - opened_at) * 1000),
             )
             await task.cancel()
 
@@ -331,7 +331,7 @@ async def websocket_endpoint(websocket: WebSocket):
             session_id=session_id,
             category="websocket",
             reason="clean_disconnect",
-            duration_ms=int((asyncio.get_event_loop().time() - opened_at) * 1000),
+            duration_ms=int((time.monotonic() - opened_at) * 1000),
         )
         logger.info("WebSocket disconnected cleanly | session_id={}", session_id)
     except Exception as e:

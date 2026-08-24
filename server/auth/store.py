@@ -11,6 +11,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from loguru import logger
+
 import config
 
 
@@ -92,41 +94,79 @@ class AuthStore:
                 );
                 """
             )
-        self._ensure_bootstrap_user()
+        self._lock_legacy_bootstrap_account()
+        self._ensure_demo_user()
 
-    def _ensure_bootstrap_user(self) -> None:
-        """Locked demo account so Sign in works even if SQLite already has this email."""
-        if not config.is_production():
-            return
-        from auth.passwords import hash_password
+    def _lock_legacy_bootstrap_account(self) -> None:
+        """Deactivate the old hardcoded production demo user if it still exists.
 
+        That account was seeded as abcd@gmail.com with a password in source.
+        Existing databases keep the row; sign-in is rejected once inactive and
+        refresh sessions are revoked. A local opt-in demo user is a different
+        email/password from env, not this account.
+        """
         email = "abcd@gmail.com"
-        password_hash = hash_password("Abcdef@123")
-        user_id = "00000000-0000-4000-8000-abcd00000001"
         now = time.time()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT id FROM users WHERE email = ?",
                 (email,),
             ).fetchone()
-            if row is not None:
-                conn.execute(
-                    "UPDATE users SET password_hash = ?, is_active = 1 WHERE email = ?",
-                    (password_hash, email),
-                )
+            if row is None:
                 return
+            user_id = str(row["id"])
             conn.execute(
-                "INSERT INTO users (id, email, password_hash, is_active, created_at) "
-                "VALUES (?, ?, ?, 1, ?)",
-                (user_id, email, password_hash, now),
+                "UPDATE users SET is_active = 0 WHERE id = ?",
+                (user_id,),
             )
+            conn.execute(
+                "UPDATE refresh_sessions SET revoked_at = ? "
+                "WHERE user_id = ? AND revoked_at IS NULL",
+                (now, user_id),
+            )
+        logger.warning(
+            "Locked legacy bootstrap account email={} user_id={}",
+            email,
+            user_id,
+        )
+
+    def _ensure_demo_user(self) -> None:
+        """Optional local-only demo user. Never runs in production."""
+        if config.is_production() or not config.ENABLE_DEMO_LOGIN:
+            return
+        email = (config.DEMO_LOGIN_EMAIL or "").strip().lower()
+        password = config.DEMO_LOGIN_PASSWORD or ""
+        if not email or not password:
+            logger.warning(
+                "ENABLE_DEMO_LOGIN is set but DEMO_LOGIN_EMAIL or "
+                "DEMO_LOGIN_PASSWORD is empty — not seeding a demo user"
+            )
+            return
+        if email == "abcd@gmail.com":
+            logger.warning(
+                "DEMO_LOGIN_EMAIL cannot be the legacy bootstrap address; "
+                "not seeding a demo user"
+            )
+            return
+        from auth.passwords import hash_password, password_policy_error
+
+        if password_policy_error(password):
+            logger.warning(
+                "DEMO_LOGIN_PASSWORD fails the password policy — not seeding a demo user"
+            )
+            return
+        password_hash = hash_password(password)
+        self.create_user(email=email, password_hash=password_hash)
+        logger.info("Demo login user ready email={}", email)
 
     def create_user(self, *, email: str, password_hash: str) -> UserRecord | None:
-        """Create the account, or reset the password if that email already exists.
+        """Create a new account. Existing emails are left unchanged.
 
-        Re-signup is how a locked-out student reclaims the same email (no mail
-        verification / reset flow). Old refresh sessions are revoked.
+        Duplicate emails return None so signup can send a generic conflict
+        response. Password hash and refresh sessions are not modified.
         """
+        if email.strip().lower() == "abcd@gmail.com":
+            return None
         user_id = str(uuid.uuid4())
         now = time.time()
         with self._lock, self._connect() as conn:
@@ -137,22 +177,7 @@ class AuthStore:
                     (user_id, email, password_hash, now),
                 )
             except sqlite3.IntegrityError:
-                row = conn.execute(
-                    "SELECT id FROM users WHERE email = ?",
-                    (email,),
-                ).fetchone()
-                if row is None:
-                    return None
-                user_id = str(row["id"])
-                conn.execute(
-                    "UPDATE users SET password_hash = ?, is_active = 1 WHERE id = ?",
-                    (password_hash, user_id),
-                )
-                conn.execute(
-                    "UPDATE refresh_sessions SET revoked_at = ? "
-                    "WHERE user_id = ? AND revoked_at IS NULL",
-                    (now, user_id),
-                )
+                return None
         return UserRecord(id=user_id, email=email, password_hash=password_hash, is_active=True)
 
     def get_user_by_email(self, email: str) -> UserRecord | None:

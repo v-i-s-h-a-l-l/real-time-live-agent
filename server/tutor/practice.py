@@ -80,6 +80,8 @@ _HINT_REQUEST = re.compile(
 _DONT_KNOW = re.compile(
     r"("
     r"\bi (?:really )?(?:don'?t|do not|dont) know\b"
+    r"|\bidk\b"
+    r"|\bi give up\b"
     r"|\bno (?:idea|clue)\b"
     r"|\bnot sure(?: at all)?\b"
     r"|\bcan'?t (?:figure|work) (?:it|this) out\b"
@@ -383,6 +385,7 @@ class TopicProgress:
     retries: int = 0
     consecutive_correct: int = 0
     consecutive_incorrect: int = 0
+    consecutive_struggles: int = 0
     current_difficulty: int = MIN_DIFFICULTY
     questions_attempted: set[str] = field(default_factory=set)
     questions_solved: set[str] = field(default_factory=set)
@@ -458,6 +461,7 @@ class PracticeSnapshot:
     incorrect: int
     consecutive_correct: int
     consecutive_incorrect: int
+    consecutive_struggles: int
     mastery: MasteryLevel
     reveal_solution: bool
     missing_values: tuple[float, ...] = ()
@@ -477,6 +481,7 @@ class PracticeSnapshot:
             "incorrect": self.incorrect,
             "consecutiveCorrect": self.consecutive_correct,
             "consecutiveIncorrect": self.consecutive_incorrect,
+            "consecutiveStruggles": self.consecutive_struggles,
             "mastery": self.mastery.value,
             "revealSolution": self.reveal_solution,
         }
@@ -580,6 +585,7 @@ class PracticeTracker:
             topic.correct += 1
             topic.consecutive_correct += 1
             topic.consecutive_incorrect = 0
+            topic.consecutive_struggles = 0
             if not question.solved:
                 question.solved = True
                 topic.questions_solved.add(question.question_id)
@@ -589,10 +595,12 @@ class PracticeTracker:
         elif evaluation == AnswerEvaluation.PARTIALLY_CORRECT:
             topic.partial += 1
             topic.consecutive_incorrect = 0
+            topic.consecutive_struggles += 1
             question.failed_attempts += 1
         else:
             topic.incorrect += 1
             topic.consecutive_incorrect += 1
+            topic.consecutive_struggles += 1
             topic.consecutive_correct = 0
             question.failed_attempts += 1
 
@@ -654,6 +662,7 @@ class PracticeTracker:
             incorrect=topic.incorrect if topic else 0,
             consecutive_correct=topic.consecutive_correct if topic else 0,
             consecutive_incorrect=topic.consecutive_incorrect if topic else 0,
+            consecutive_struggles=topic.consecutive_struggles if topic else 0,
             mastery=topic.mastery if topic else MasteryLevel.NOT_STARTED,
             reveal_solution=bool(question and question.hint_level >= MAX_HINT_LEVEL),
             missing_values=self._last_missing,

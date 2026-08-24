@@ -144,6 +144,10 @@ def test_engine_routes_all_canonical_faqs():
             current_section_title="Euclid's Division Lemma",
         )
         decision = engine.decide(question, state)
+        if faq_id == "study_break":
+            # A live "can I take a break" is a need, not a product FAQ recitation.
+            assert "steer:grant_pause" in decision.notes, question
+            continue
         assert decision.intent == StudentIntent.FAQ, question
         assert decision.faq_id == faq_id, question
         assert decision.faq_answer == FAQ_BY_ID[faq_id].answer

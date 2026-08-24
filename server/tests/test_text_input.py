@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from protocol import CLIENT_SESSION_CONTEXT, CLIENT_TEXT_INPUT  # noqa: E402
 from processors.session_context import SessionContextStore  # noqa: E402
 from processors.text_input import parse_text_input  # noqa: E402
-from processors.tutor_turn import _last_user_text  # noqa: E402
+from processors.llm_context_text import _last_user_text  # noqa: E402
 from tutor.engine import TutorEngine  # noqa: E402
 from tutor.types import TeachingMode, TutorState  # noqa: E402
 

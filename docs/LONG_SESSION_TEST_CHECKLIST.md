@@ -25,7 +25,7 @@ Use this after production-hardening or voice-pipeline changes. **Do not run in C
 | 10 | **Long tutor explanations** | Ask “explain in detail” and let tutor speak 60s+ | Full reply streams; can interrupt; math spoken clearly |
 | 11 | **STT reconnect** | Run 15 min session or simulate network blip | Server logs `stt_reconnect_attempt` / `stt_reconnect_success`; user sees reconnect banner; speech works after |
 | 12 | **WebSocket reconnect** | Toggle airplane mode 3s mid-session (or kill/restart backend once) | Client shows “Voice connection lost” / “Reconnecting…”; recovers or prompts End + Talk again |
-| 13 | **LLM failover** | (Optional) exhaust Cerebras quota | Server logs `cerebras_429` + `groq_failover`; tutor still answers (may be slower) |
+| 13 | **LLM empty guard** | (Optional) force a silent/empty LLM turn | Tutor speaks the empty-guard fallback after `LLM_EMPTY_GUARD_TIMEOUT_SECS` (default 20) |
 | 14 | **TTS failure** | (Hard to trigger) if Cartesia errors | Spoken reply may stop; typed chat may still work; check server logs |
 | 15 | **Break feature** | Ask for a short break | Break timer UI; tutor acknowledges; resume works |
 | 16 | **Safety handling** | Trigger holding/distress phrasing (careful testing) | Safety banner; appropriate spoken response; lesson can resume |
@@ -56,7 +56,7 @@ Filter logs for `"event":` in `ops` lines:
 
 - `ws_open`, `ws_close`, `ws_auth_failure`, `ws_auth_ok`
 - `stt_connection_failure`, `stt_reconnect_attempt`, `stt_reconnect_success`
-- `llm_request_failure`, `cerebras_429`, `groq_failover`
+- `llm_request_failure`
 - `pipeline_exception`, `voice_session_failure`
 
 Never expect secrets, JWTs, or raw audio in these lines.

@@ -1,6 +1,6 @@
-# Backend — FastAPI + Pipecat (Render)
+# Backend — FastAPI + Pipecat (Railway)
 
-Voice engine for the Lumina tutor. Deploy to **Render**; the Next.js UI lives in [`../tutor-frontend/`](../tutor-frontend/) (Vercel).
+Voice engine for the Lumina tutor. Deploy to **Railway**; the Next.js UI lives in [`../tutor-frontend/`](../tutor-frontend/) (Vercel). Render is an alternative (`../render.yaml`).
 
 ## Local development
 
@@ -18,7 +18,13 @@ Readiness: `GET http://127.0.0.1:8805/ready` (checks API keys + production confi
 
 WebSocket: `ws://127.0.0.1:8805/ws`
 
-## Render (native Python)
+## Railway
+
+[`../railway.toml`](../railway.toml) — Railpack, start command unchanged, healthcheck `GET /ready`.
+
+Set environment variables from [`.env.example`](../.env.example) in the Railway dashboard. Env vars cannot be declared in `railway.toml` (schema has no `[variables]` section).
+
+## Render (native Python, alternative)
 
 Use [`../render.yaml`](../render.yaml) Blueprint or manual Web Service:
 
@@ -50,17 +56,20 @@ On Render, either keep native Python (`render.yaml`) or switch the service to **
 
 ## Environment
 
-See [`../.env.example`](../.env.example). Production minimum:
+See [`../.env.example`](../.env.example). Production minimum (matches [`../railway.toml`](../railway.toml)):
 
 - `ENVIRONMENT=production`
 - `SESSION_SECRET`, `AUTH_SECRET` (or shared secret)
 - `FRONTEND_ORIGIN=https://your-app.vercel.app`
-- `SARVAM_API_KEY`, `CEREBRAS_API_KEY`, `CARTESIA_API_KEY`
+- `SARVAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY`
+- `LLM_PROVIDER=openai`
+- `REDIS_URL`
 - `ALLOW_ANONYMOUS_WS=0`
+- `ENABLE_DEMO_LOGIN=0`
 
 ## Persistence warning
 
-Auth uses **SQLite** at `server/data/auth.sqlite` by default. Render’s filesystem is **ephemeral** — user accounts may be lost on redeploy unless you attach a persistent disk or migrate to PostgreSQL (planned separately).
+Auth uses **SQLite** at `server/data/auth.sqlite` by default. Railway/Render filesystems are **ephemeral** — user accounts may be lost on redeploy unless you attach a volume or migrate to PostgreSQL (planned separately).
 
 ## Tests
 

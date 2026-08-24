@@ -10,7 +10,7 @@ Browser (tutor-frontend, :3000)
                                     │
                                     ├─ Sarvam STT
                                     ├─ Tutor Engine (intent → policy → prompt)
-                                    ├─ Cerebras LLM (Groq failover)
+                                    ├─ OpenAI LLM (LLM_PROVIDER=openai)
                                     ├─ speak_math + Naturalizer
                                     └─ Cartesia TTS
 ```
@@ -80,10 +80,12 @@ npm run dev
 
 Open `http://localhost:3000`. The engine is `ws://127.0.0.1:8805/ws`.
 
-- `GET /health` — process is up
-- `GET /ready` — STT, LLM, and TTS keys are present
+- `GET /health` — process is up (liveness; no key checks)
+- `GET /ready` — STT, LLM, and TTS keys plus production blockers (`FRONTEND_ORIGIN`, `SESSION_SECRET`, `ALLOW_ANONYMOUS_WS`). Railway healthcheck uses this path. The JSON body does **not** include `LLM_PROVIDER`; a missing `OPENAI_API_KEY` (when `LLM_PROVIDER=openai`) still returns 503.
 
-Required secrets (root `.env`): `SARVAM_API_KEY`, `CEREBRAS_API_KEY`, `CARTESIA_API_KEY`. `GROQ_API_KEY` is optional failover.
+Required secrets (root `.env` / Railway dashboard): `SARVAM_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY`. Production also requires `SESSION_SECRET`, `FRONTEND_ORIGIN`, `REDIS_URL`, `ENVIRONMENT=production`. `LLM_PROVIDER` defaults to `openai`. `GROQ_API_KEY` / `GEMINI_API_KEY` / `OPENROUTER_API_KEY` are optional and only used if you switch `LLM_PROVIDER`. There is no `CEREBRAS_API_KEY` and no Sentry DSN in `config.py`.
+
+Inventory that must stay in sync: [`railway.toml`](../railway.toml) comments, [`.env.example`](../.env.example), [`docs/deployment.md`](./deployment.md).
 
 ## Tests
 

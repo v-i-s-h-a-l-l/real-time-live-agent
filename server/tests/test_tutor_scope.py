@@ -51,8 +51,9 @@ def test_cricket_redirects_and_does_not_answer():
     assert d.move == ConversationMove.REDIRECT
     low = d.strategy.lower()
     assert "do not answer" in low
-    assert "never say things like" in low
-    assert "that's outside our lesson" in low
+    assert "chosen action: hold_scope" in low
+    assert "that's outside" not in low
+    assert "continue the current section" not in low
     assert state.off_topic_count == 1
 
 
@@ -63,8 +64,9 @@ def test_no_after_cricket_stays_in_maths_domain():
     assert d.intent == StudentIntent.UNRELATED
     assert d.mode == TeachingMode.REDIRECT
     low = d.strategy.lower()
-    assert "can't switch" in low or "cannot switch" in low
-    assert "do not pause tutoring" in low
+    # A second deflection is a check-in — still must not answer the fact.
+    assert "chosen action: check_in" in low
+    assert "do not answer" in low
     assert state.off_topic_count == 2
 
 
@@ -77,7 +79,10 @@ def test_insistence_does_not_unlock_general_chat():
     d2 = engine.decide("Tell me about Dhoni.", state)
     assert d2.intent == StudentIntent.UNRELATED
     assert d2.mode == TeachingMode.REDIRECT
-    assert "do not become a general-purpose assistant" in d2.strategy.lower()
+    # Diagnose once, then hold the line — do not ask the check-in again.
+    assert "chosen action: check_in" in d1.strategy.lower()
+    assert "chosen action: hold_firm" in d2.strategy.lower()
+    assert "do not answer the question" in d2.strategy.lower()
     assert d1.strategy != d2.strategy
     assert state.off_topic_count == 3
 
@@ -129,8 +134,8 @@ def test_now_talk_cricket_stays_locked():
     assert d.intent == StudentIntent.UNRELATED
     assert d.mode == TeachingMode.REDIRECT
     low = d.strategy.lower()
-    assert "can't switch" in low or "cannot switch" in low
-    assert "do not agree" in low or "never say yes" in low
+    assert "chosen action: hold_firm" in low
+    assert "do not answer" in low
 
 
 def test_back_to_maths_resumes_teaching():
@@ -179,4 +184,8 @@ def test_directive_includes_application_domain():
         utterance="Tell me about cricket.",
     )
     assert "Class 10 Mathematics Tutor" in directive
-    assert "Scope lock" in directive
+    assert "Human steering" in directive
+    assert "Teaching mode: hold_scope" in directive
+    assert "acknowledge_and_steer" not in directive
+    assert "Teaching mode: redirect" not in directive
+    assert "that's outside" not in directive.lower()

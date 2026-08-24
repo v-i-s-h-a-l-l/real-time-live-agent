@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 
+from tutor.intent import is_ready_to_proceed, is_strong_ready
 from tutor.types import ConversationMove, StudentIntent, TeachingMode, TutorState
 
 APPLICATION_DOMAIN = "Class 10 Mathematics Tutor"
@@ -109,8 +110,15 @@ def apply_domain_scope(
     if not text:
         return intent
 
-    if is_resume_lesson(text):
+    if is_resume_lesson(text) or is_strong_ready(text):
         return StudentIntent.EXPLANATION
+    if is_ready_to_proceed(text) and intent in {
+        StudentIntent.UNKNOWN,
+        StudentIntent.GREETING,
+        StudentIntent.HESITATION,
+        StudentIntent.ACKNOWLEDGEMENT,
+    }:
+        return StudentIntent.ACKNOWLEDGEMENT
 
     if intent == StudentIntent.UNRELATED:
         return StudentIntent.UNRELATED
@@ -131,6 +139,10 @@ def apply_domain_scope(
         StudentIntent.GREETING,
         StudentIntent.HESITATION,
     }:
+        # After a check-in, a short unmapped reply is an answer to our
+        # question, not another tangent.
+        if state.awaiting_reason and not is_domain_insistence(text):
+            return intent
         return StudentIntent.UNRELATED
 
     if is_domain_insistence(text) and intent not in _ON_TOPIC_UNLOCK:

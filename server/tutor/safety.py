@@ -10,6 +10,7 @@ not a single exact English phrase.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from languages import LANG_EN, LANG_HI, LANG_TA, LANG_TE, normalize_session_lang
+from ops_log import ops_event
 
 SafetyCategory = Literal["self_harm", "harm_to_others"]
 SafetySeverity = Literal["high"]
@@ -47,6 +49,15 @@ class SafetyKind(str, Enum):
     NOT_IN_DANGER = "not_in_danger"
     HOLDING = "holding"
     RESUME = "resume"
+
+
+# Consecutive non-resume, non-danger turns while PAUSED before tutoring resumes.
+# Crisis detection is unchanged; this only escapes a stuck HOLDING state.
+HOLDING_MISS_RESUME_AFTER = 2
+
+
+def utterance_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # ── Normalisation ────────────────────────────────────────────────────────────
@@ -588,6 +599,7 @@ class SafetyStore:
         self.phase: SafetyPhase = SafetyPhase.IDLE
         self.last_category: SafetyCategory | None = None
         self.awaiting_danger_reply: bool = False
+        self._holding_misses: int = 0
 
     @property
     def paused(self) -> bool:
@@ -597,6 +609,26 @@ class SafetyStore:
         self.phase = SafetyPhase.IDLE
         self.last_category = None
         self.awaiting_danger_reply = False
+        self._holding_misses = 0
+
+    def _log_swallowed(self, utterance: str, kind: SafetyKind) -> None:
+        ops_event(
+            "safety_turn_swallowed",
+            category=self.last_category or kind.value,
+            utterance_hash=utterance_hash(utterance),
+            kind=kind.value,
+        )
+
+    def _swallowed(
+        self,
+        utterance: str,
+        result: SafetyTurnResult,
+    ) -> SafetyTurnResult:
+        self._log_swallowed(utterance, result.kind)
+        return result
+
+    def _clear_holding_misses(self) -> None:
+        self._holding_misses = 0
 
     def apply(
         self,
@@ -607,7 +639,7 @@ class SafetyStore:
     ) -> SafetyTurnResult | None:
         hit = classify(utterance)
         if hit is not None:
-            return self._alert(hit, language, now)
+            return self._alert(hit, language, now, utterance)
 
         if self.phase == SafetyPhase.IDLE:
             return None
@@ -615,6 +647,7 @@ class SafetyStore:
         if is_resume_utterance(utterance):
             self.phase = SafetyPhase.IDLE
             self.awaiting_danger_reply = False
+            self._clear_holding_misses()
             return SafetyTurnResult(
                 kind=SafetyKind.RESUME,
                 swallow=False,
@@ -629,13 +662,17 @@ class SafetyStore:
         ):
             spoken = spoken_immediate_danger(language)
             self.awaiting_danger_reply = False
+            self._clear_holding_misses()
             category = self.last_category or "self_harm"
-            return SafetyTurnResult(
-                kind=SafetyKind.IMMEDIATE_DANGER,
-                swallow=True,
-                drop_last_user=True,
-                spoken=spoken,
-                event=make_alert_event(category, now, spoken=spoken),
+            return self._swallowed(
+                utterance,
+                SafetyTurnResult(
+                    kind=SafetyKind.IMMEDIATE_DANGER,
+                    swallow=True,
+                    drop_last_user=True,
+                    spoken=spoken,
+                    event=make_alert_event(category, now, spoken=spoken),
+                ),
             )
 
         if (
@@ -644,32 +681,56 @@ class SafetyStore:
             and not is_not_in_danger_utterance(utterance)
         ):
             spoken = spoken_harm_others_urgent(language)
-            return SafetyTurnResult(
-                kind=SafetyKind.IMMEDIATE_DANGER,
-                swallow=True,
-                drop_last_user=True,
-                spoken=spoken,
-                event=make_alert_event("harm_to_others", now, spoken=spoken),
+            self._clear_holding_misses()
+            return self._swallowed(
+                utterance,
+                SafetyTurnResult(
+                    kind=SafetyKind.IMMEDIATE_DANGER,
+                    swallow=True,
+                    drop_last_user=True,
+                    spoken=spoken,
+                    event=make_alert_event("harm_to_others", now, spoken=spoken),
+                ),
             )
 
         if is_not_in_danger_utterance(utterance):
             spoken = spoken_not_in_danger(language)
             self.awaiting_danger_reply = False
+            self._clear_holding_misses()
+            return self._swallowed(
+                utterance,
+                SafetyTurnResult(
+                    kind=SafetyKind.NOT_IN_DANGER,
+                    swallow=True,
+                    drop_last_user=True,
+                    spoken=spoken,
+                    event=None,
+                ),
+            )
+
+        self._holding_misses += 1
+        if self._holding_misses >= HOLDING_MISS_RESUME_AFTER:
+            self.phase = SafetyPhase.IDLE
+            self.awaiting_danger_reply = False
+            self._clear_holding_misses()
             return SafetyTurnResult(
-                kind=SafetyKind.NOT_IN_DANGER,
-                swallow=True,
-                drop_last_user=True,
-                spoken=spoken,
+                kind=SafetyKind.RESUME,
+                swallow=False,
+                drop_last_user=False,
+                spoken="",
                 event=None,
             )
 
         spoken = spoken_holding(language)
-        return SafetyTurnResult(
-            kind=SafetyKind.HOLDING,
-            swallow=True,
-            drop_last_user=True,
-            spoken=spoken,
-            event=None,
+        return self._swallowed(
+            utterance,
+            SafetyTurnResult(
+                kind=SafetyKind.HOLDING,
+                swallow=True,
+                drop_last_user=True,
+                spoken=spoken,
+                event=None,
+            ),
         )
 
     def _alert(
@@ -677,15 +738,20 @@ class SafetyStore:
         hit: SafetyHit,
         language: str,
         now: float,
+        utterance: str,
     ) -> SafetyTurnResult:
         self.phase = SafetyPhase.PAUSED
         self.last_category = hit.category
         self.awaiting_danger_reply = hit.category == "self_harm"
+        self._clear_holding_misses()
         spoken = spoken_for(hit.category, language)
-        return SafetyTurnResult(
-            kind=SafetyKind.ALERT,
-            swallow=True,
-            drop_last_user=True,
-            spoken=spoken,
-            event=make_alert_event(hit.category, now, spoken=spoken),
+        return self._swallowed(
+            utterance,
+            SafetyTurnResult(
+                kind=SafetyKind.ALERT,
+                swallow=True,
+                drop_last_user=True,
+                spoken=spoken,
+                event=make_alert_event(hit.category, now, spoken=spoken),
+            ),
         )

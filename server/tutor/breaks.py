@@ -17,10 +17,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from loguru import logger
+
+from tutor.intent import is_hostile_to_tutor
+
 MAX_BREAK_MINUTES: int = 5
 SUPPORTED_BREAK_MINUTES: tuple[int, ...] = (1, 2, 3, 4, 5)
 MAX_BREAK_SECONDS: int = MAX_BREAK_MINUTES * 60
 MS_PER_SECOND: int = 1000
+# Non-duration replies while asking "how long?" before we drop the state.
+MAX_NEGOTIATION_MISSES: int = 2
 
 # Spoken number words we accept for 1–5 and for rejecting longer asks.
 _NUMBER_WORDS: dict[str, int] = {
@@ -107,6 +113,7 @@ class BreakState:
     started_at: float | None = None  # unix seconds
     ends_at: float | None = None  # unix seconds
     during_break_replied: bool = False
+    negotiation_misses: int = 0
 
     @property
     def active(self) -> bool:
@@ -178,8 +185,8 @@ _BREAK_WORD = re.compile(r"\b(break|rest)\b", re.I)
 _REQUEST_CUE = re.compile(
     r"\b("
     r"i\s+(?:want|need|could\s+use)|"
-    r"can\s+i\s+(?:have|take|get)|"
-    r"could\s+i\s+(?:have|take)|"
+    r"can\s+i\s+(?:have|take|get|rest|break)|"
+    r"could\s+i\s+(?:have|take|rest|break)|"
     r"give\s+me|"
     r"let'?s\s+(?:take|have)|"
     r"allow\s+me|"
@@ -188,15 +195,65 @@ _REQUEST_CUE = re.compile(
     re.I,
 )
 
+# Bare "break"/"rest" is not a request. "why are you asking about a break"
+# must not start or continue duration negotiation.
+_EXPLICIT_BREAK_ASK = re.compile(
+    r"("
+    r"\b(?:take|need|want|having|have|had)\s+(?:a\s+)?(?:quick\s+)?(?:break|rest)\b|"
+    r"\b(?:break|rest)\s+please\b|"
+    r"\btime\s+for\s+(?:a\s+)?(?:break|rest)\b|"
+    r"\b(?:break|rest)\s+time\b"
+    r")",
+    re.I,
+)
+
+# Math confirmation / working must never look like a study-break ask.
+_MATH_TALK = re.compile(
+    r"("
+    r"\bam\s+i\s+right\b|"
+    r"\bis\s+(?:that|this|it)\s+(?:right|correct)\b|"
+    r"\bequals?\b|"
+    r"\bplus\b|"
+    r"\bminus\b|"
+    r"\btimes\b|"
+    r"\bdivided\s+by\b|"
+    r"\bremainder\b|"
+    r"\bquotient\b|"
+    r"\bdivisor\b"
+    r")",
+    re.I,
+)
+
+# Pushback, decline, or "why are you talking about a break" while negotiating.
+_NEGOTIATION_ESCAPE = re.compile(
+    r"("
+    r"\bi\s+don'?t\s+want\s+(?:a\s+|to\s+)?(?:break|rest)\b|"
+    r"\bdon'?t\s+(?:want|need|give\s+me)\s+(?:a\s+|to\s+)?(?:break|rest)\b|"
+    r"\bno\s+(?:break|rest)\b|"
+    r"\bnot\s+(?:asking\s+for\s+|wanting\s+)?(?:a\s+)?(?:break|rest)\b|"
+    r"\bwhy\s+(?:are\s+you|would\s+you|do\s+you)\b.{0,80}\b(?:break|rest)\b|"
+    r"\b(?:break|rest)\b.{0,80}\bwhy\s+(?:are\s+you|would\s+you|do\s+you)\b|"
+    r"\bwhy\s+(?:ask|asking|give|giving)\b.{0,80}\b(?:break|rest)\b|"
+    r"\bstop\s+(?:asking|giving|talking)\b.{0,80}\b(?:break|rest)\b|"
+    r"\bdesperately\b.{0,40}\b(?:break|rest)\b|"
+    r"\b(?:break|rest)\b.{0,40}\bdesperately\b|"
+    r"\bwhat\s+the\s+(?:fuck|hell)\b"
+    r")",
+    re.I,
+)
+
 _RESUME = re.compile(
     r"("
     r"\bi(?:'?m|\s+am)\s+back\b|"
     r"\bi(?:'?m|\s+am)\s+ready\b|"
-    r"\blet'?s\s+continue\b|"
+    r"\bi\s+changed\s+my\s+mind\b|"
+    r"\bi\s+want\s+to\s+continue\b|"
+    r"\bwant\s+to\s+continue\s+with\s+(?:the\s+)?(?:maths?|math|lesson)\b|"
+    r"\blet'?s\s+(?:continue|go\s+back|get\s+back|resume)\b|"
     r"\bend\s+(?:the\s+)?break\b|"
     r"\bi\s+don'?t\s+need\s+(?:the\s+)?break\b|"
     r"\bready\s+to\s+(?:continue|go\s+back|resume)\b|"
-    r"\bcontinue\s+(?:the\s+)?(?:lesson|class)\b"
+    r"\bcontinue\s+(?:with\s+)?(?:the\s+)?(?:lesson|class|maths?|math)\b"
     r")",
     re.I,
 )
@@ -299,6 +356,15 @@ def _has_break_word(text: str) -> bool:
     return bool(_BREAK_WORD.search(text))
 
 
+def _is_explicit_break_request(text: str, *, has_break: bool, request_cue: bool) -> bool:
+    """True only when the student is actually asking to pause studying."""
+    if not has_break:
+        return False
+    if _NEGOTIATION_ESCAPE.search(text) or is_hostile_to_tutor(text):
+        return False
+    return request_cue or bool(_EXPLICIT_BREAK_ASK.search(text))
+
+
 def classify_utterance(text: str, phase: BreakPhase) -> BreakUtterance:
     """Map a finalized student utterance onto a break action.
 
@@ -312,16 +378,25 @@ def classify_utterance(text: str, phase: BreakPhase) -> BreakUtterance:
     duration = parse_duration(utterance)
     has_break = _has_break_word(utterance)
     request_cue = bool(_REQUEST_CUE.search(utterance))
+    explicit_request = _is_explicit_break_request(
+        utterance, has_break=has_break, request_cue=request_cue
+    )
+    math_talk = bool(_MATH_TALK.search(utterance))
+    escape = bool(_NEGOTIATION_ESCAPE.search(utterance) or is_hostile_to_tutor(utterance))
 
     if phase == BreakPhase.ACTIVE:
-        if _RESUME.search(utterance):
-            return BreakUtterance(BreakKind.RESUME)
         if _EXTEND_CUE.search(utterance) and duration is not None:
             return BreakUtterance(
                 BreakKind.EXTEND,
                 minutes=duration.minutes if duration.is_supported else None,
                 parsed=duration,
             )
+        if _RESUME.search(utterance):
+            return BreakUtterance(BreakKind.RESUME)
+        if is_hostile_to_tutor(utterance) or (
+            _NEGOTIATION_ESCAPE.search(utterance) and has_break
+        ):
+            return BreakUtterance(BreakKind.RESUME)
         if has_break or request_cue or duration is not None:
             return BreakUtterance(
                 BreakKind.ALREADY_ACTIVE,
@@ -331,13 +406,13 @@ def classify_utterance(text: str, phase: BreakPhase) -> BreakUtterance:
         return BreakUtterance(BreakKind.DURING_CHAT)
 
     if phase in (BreakPhase.REQUESTING_DURATION, BreakPhase.OFFERING_MAX):
+        if escape or (math_talk and not explicit_request):
+            return BreakUtterance(BreakKind.NONE)
         if _RESUME.search(utterance):
             return BreakUtterance(BreakKind.DECLINE_OFFER)
         if phase == BreakPhase.OFFERING_MAX and _YES.match(utterance):
             return BreakUtterance(BreakKind.ACCEPT_OFFER, minutes=MAX_BREAK_MINUTES)
-        if phase in (BreakPhase.REQUESTING_DURATION, BreakPhase.OFFERING_MAX) and _NO.match(
-            utterance
-        ):
+        if _NO.match(utterance):
             return BreakUtterance(BreakKind.DECLINE_OFFER)
 
         answer = duration or parse_bare_duration(utterance)
@@ -348,14 +423,20 @@ def classify_utterance(text: str, phase: BreakPhase) -> BreakUtterance:
                 )
             return BreakUtterance(BreakKind.REQUEST_INVALID, parsed=answer)
 
-        if has_break and duration is None:
+        if explicit_request:
             return BreakUtterance(BreakKind.REQUEST_NO_DURATION)
 
-    # Idle (and leftover requesting text that wasn't a duration).
+        # Mentioning "break" again is not a duration. Let the LLM hear it.
+        return BreakUtterance(BreakKind.NONE)
+
+    # Idle.
+    if escape or (math_talk and not explicit_request):
+        return BreakUtterance(BreakKind.NONE)
+
     if _RESUME.search(utterance) and not has_break:
         return BreakUtterance(BreakKind.NONE)
 
-    if has_break:
+    if explicit_request:
         if duration is None:
             return BreakUtterance(BreakKind.REQUEST_NO_DURATION)
         if duration.is_supported:
@@ -519,6 +600,7 @@ class BreakStore:
     def __init__(self) -> None:
         self.state = BreakState()
         self.generation: int = 0
+        self._last_spoken: str = ""
 
     def should_skip_mute(self, text: str) -> bool:
         return should_skip_call_mute(text, self.state.phase)
@@ -531,14 +613,31 @@ class BreakStore:
         if not text:
             return None
         classified = classify_utterance(text, self.state.phase)
+        negotiating = self.state.phase in (
+            BreakPhase.REQUESTING_DURATION,
+            BreakPhase.OFFERING_MAX,
+        )
         if classified.kind == BreakKind.NONE:
-            if self.state.phase in (
-                BreakPhase.REQUESTING_DURATION,
-                BreakPhase.OFFERING_MAX,
-            ):
-                # They changed the subject instead of naming a duration.
+            if negotiating:
+                logger.warning(
+                    "[BreakStore] unmatched reply while negotiating duration; "
+                    "clearing state so the LLM can handle the current message"
+                )
                 self.state = BreakState()
             return None
+
+        if (
+            negotiating
+            and classified.kind == BreakKind.REQUEST_NO_DURATION
+        ):
+            self.state.negotiation_misses += 1
+            logger.warning(
+                "[BreakStore] ignoring repeat duration-ask while already negotiating"
+            )
+            if self.state.negotiation_misses >= MAX_NEGOTIATION_MISSES:
+                self.state = BreakState()
+            return None
+
         handler = {
             BreakKind.REQUEST_NO_DURATION: self._ask_duration,
             BreakKind.REQUEST_VALID: self._start_from_request,
@@ -551,7 +650,23 @@ class BreakStore:
             BreakKind.ALREADY_ACTIVE: self._already_active,
             BreakKind.DURING_CHAT: self._during_chat,
         }[classified.kind]
-        return handler(classified, now)
+        result = handler(classified, now)
+        if result is not None and result.spoken:
+            if (
+                result.spoken == self._last_spoken
+                and classified.kind == BreakKind.REQUEST_NO_DURATION
+            ):
+                logger.error(
+                    "[BreakStore] blocked identical duration-ask reply; passing through to LLM"
+                )
+                if self.state.phase in (
+                    BreakPhase.REQUESTING_DURATION,
+                    BreakPhase.OFFERING_MAX,
+                ):
+                    self.state = BreakState()
+                return None
+            self._last_spoken = result.spoken
+        return result
 
     def expire(self, now: float, generation: int) -> BreakTurnResult | None:
         """Fire BREAK_END once. Stale generations are ignored."""
@@ -577,6 +692,16 @@ class BreakStore:
         """Drop in-memory break state (disconnect / new connection)."""
         self.generation += 1
         self.state = BreakState()
+        self._last_spoken = ""
+
+    def clear_negotiation(self) -> None:
+        """Drop duration-ask state without touching an active timed break."""
+        if self.state.phase in (
+            BreakPhase.REQUESTING_DURATION,
+            BreakPhase.OFFERING_MAX,
+        ):
+            self.state = BreakState()
+        self._last_spoken = ""
 
     def _ask_duration(self, _classified: BreakUtterance, _now: float) -> BreakTurnResult:
         self.state = BreakState(phase=BreakPhase.REQUESTING_DURATION)

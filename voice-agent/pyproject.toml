@@ -11,7 +11,7 @@ dependencies = [
     "loguru>=0.7.3",
     "noisereduce>=3.0.3",
     "numpy<2.0",
-    "pipecat-ai[cartesia,cerebras,deepgram,groq,sarvam,silero,websocket]>=1.1.0",
+    "pipecat-ai[cartesia,openai,groq,sarvam,silero,websocket]>=1.1.0",
     "python-dotenv>=1.2.2",
     "scipy>=1.17.1",
     "torch>=2.11.0",

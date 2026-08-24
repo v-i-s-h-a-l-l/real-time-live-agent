@@ -24,13 +24,35 @@ def _decide(utterance: str, *, phase: str = "learning", **state_kw):
     return engine.decide(utterance, state), state
 
 
-def test_okay_is_micro_ack():
-    d, _ = _decide("Okay.")
+def test_right_is_micro_ack():
+    d, _ = _decide("Right.")
     assert d.intent == StudentIntent.ACKNOWLEDGEMENT
     assert d.mode == TeachingMode.ACKNOWLEDGE
     assert d.move == ConversationMove.ACKNOWLEDGE
     assert d.response_length == ResponseLength.MICRO
     assert d.check_understanding is False
+
+
+def test_okay_and_yes_ready_continue_into_content():
+    for phrase in ("Okay.", "yes", "yes ready", "ready"):
+        d, _ = _decide(phrase)
+        assert "ready_continue" in d.notes, phrase
+        assert d.mode == TeachingMode.LEARN, phrase
+        assert "let's proceed" in d.strategy.lower(), phrase
+
+
+def test_yes_ready_in_practice_delivers_next_question():
+    d, _ = _decide("yes ready", phase="practice")
+    assert "ready_continue" in d.notes
+    assert "practice question" in d.strategy.lower()
+    assert d.response_length == ResponseLength.MEDIUM
+
+
+def test_mid_session_hello_does_not_reintroduce():
+    d, _ = _decide("Hi", student_turns=3)
+    assert d.intent == StudentIntent.GREETING
+    assert "do not introduce yourself" in d.strategy.lower()
+    assert "do not restate the slide" in d.strategy.lower()
 
 
 def test_hmm_is_hesitation_wait():
@@ -77,7 +99,7 @@ def test_weather_redirects():
     d, state = _decide("What's the weather?")
     assert d.intent == StudentIntent.UNRELATED
     assert d.mode == TeachingMode.REDIRECT
-    assert d.response_length == ResponseLength.MICRO
+    assert d.response_length == ResponseLength.SHORT
     assert state.off_topic_count == 1
 
 

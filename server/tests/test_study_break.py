@@ -154,6 +154,22 @@ def test_lets_continue_cancels_break():
     assert "welcome back" in result.spoken.lower()
 
 
+def test_changed_mind_and_continue_maths_end_break_immediately():
+    for phrase in (
+        "I changed my mind.",
+        "I want to continue with maths.",
+        "I want to continue.",
+    ):
+        store = _store()
+        store.apply("I need a five minute break.", 0.0)
+        result = store.apply(phrase, 20.0)
+        assert result is not None, phrase
+        assert store.state.phase == BreakPhase.IDLE, phrase
+        assert "still on" not in result.spoken.lower(), phrase
+        assert "left" not in result.spoken.lower(), phrase
+        assert result.cancel_timer is True
+
+
 def test_random_speech_during_break_does_not_resume():
     store = _store()
     store.apply("I need a three minute break.", 0.0)
@@ -298,3 +314,74 @@ def test_voice_pipeline_order_keeps_study_break_off_the_audio_path():
     assert assembled.index("user_aggregator") < assembled.index("study_break")
     assert assembled.index("study_break") < assembled.index("tutor_turn")
     assert assembled.index("study_break") < assembled.index("\n            llm,")
+
+
+MATH_CONFIRM = (
+    "So it can be represented as 255 equals 102 into 2 plus 51, am I right?"
+)
+
+
+def test_math_confirmation_is_not_a_break_request():
+    idle = BreakPhase.IDLE
+    asserting = BreakPhase.REQUESTING_DURATION
+    assert classify_utterance(MATH_CONFIRM, idle).kind == BreakKind.NONE
+    assert classify_utterance(MATH_CONFIRM, asserting).kind == BreakKind.NONE
+    store = _store()
+    store.apply("I want a break.", 0.0)
+    assert store.state.phase == BreakPhase.REQUESTING_DURATION
+    result = store.apply(MATH_CONFIRM, 1.0)
+    assert result is None
+    assert store.state.phase == BreakPhase.IDLE
+
+
+def test_break_word_in_pushback_does_not_reask_duration():
+    store = _store()
+    first = store.apply("I want a break.", 0.0)
+    assert first is not None
+    canned = first.spoken
+    for phrase in (
+        "why are you asking me about a break",
+        "I don't want to break",
+        "I don't want a break",
+        "what the fuck, why are you giving me break desperately",
+    ):
+        stuck = _store()
+        stuck.apply("I want a break.", 0.0)
+        result = stuck.apply(phrase, 1.0)
+        assert result is None, phrase
+        assert stuck.state.phase == BreakPhase.IDLE, phrase
+        assert result is None or result.spoken != canned, phrase
+
+
+def test_duration_ask_does_not_repeat_verbatim():
+    store = _store()
+    first = store.apply("I want a break.", 0.0)
+    assert first is not None
+    second = store.apply("I want a break.", 1.0)
+    assert second is None
+    assert store.state.phase == BreakPhase.REQUESTING_DURATION
+    third = store.apply("Can I take a break?", 2.0)
+    assert third is None
+    assert store.state.phase == BreakPhase.IDLE
+
+
+def test_two_minutes_still_works_after_how_long():
+    store = _store()
+    store.apply("I want a break.", 0.0)
+    result = store.apply("Two minutes.", 1.0)
+    assert result is not None
+    assert store.state.phase == BreakPhase.ACTIVE
+    assert store.state.duration_minutes == 2
+
+
+def test_hostility_during_duration_ask_reaches_the_llm():
+    from tutor.engine import TutorEngine
+
+    store = _store()
+    store.apply("I want a break.", 0.0)
+    utterance = "what the fuck, why are you giving me break desperately"
+    result = store.apply(utterance, 1.0)
+    assert result is None
+    assert store.state.phase == BreakPhase.IDLE
+    decision = TutorEngine().decide(utterance, TutorState())
+    assert "hostility_boundary" in decision.notes

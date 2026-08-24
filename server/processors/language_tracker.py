@@ -3,11 +3,11 @@ LanguageTrackerProcessor
 ────────────────────────
 Single source of truth for the conversation's active language.
 
-Reads Sarvam ``TranscriptionFrame.language`` + script heuristics, applies
-hysteresis so one stray word can't flip the language, and honours explicit
-"switch to <language>" requests immediately. The active language it holds is
-read every turn by the Tutor Engine directive, so the reply language is
-reasserted on *every* turn — not only when the language changes.
+Reads Sarvam ``TranscriptionFrame.language`` + script heuristics, plus typed
+chat via ``observe_utterance``. Applies hysteresis so one stray word can't
+flip the language, keeps Indic sessions sticky across Roman Hinglish/Tanglish,
+and honours explicit "switch to <language>" requests immediately. Tracks
+Roman vs native script so replies match how the student is typing.
 
 It updates Cartesia's TTS language on a real switch and never blocks the stream.
 The reply-language instruction itself lives in the per-turn tutor directive, so
@@ -27,10 +27,18 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 
 from languages import (
+    INDIC_LANGUAGES,
     LANG_EN,
+    SCRIPT_NATIVE,
+    SCRIPT_ROMAN,
     detect_language_request,
+    detect_romanized_indic_language,
+    detect_script_mode,
     display_name,
+    looks_like_full_english,
+    looks_like_romanized_indic,
     resolve_detected_language,
+    significant_char_count,
     to_cartesia_language,
 )
 
@@ -51,6 +59,7 @@ class LanguageTrackerProcessor(FrameProcessor):
         self._context = context
         self._session_id = session_id
         self._current = initial_language or LANG_EN
+        self._script = SCRIPT_ROMAN
         self._min_chars = min_chars
         self._min_confidence = min_confidence
         self._confirmations_needed = max(1, confirmations_needed)
@@ -68,6 +77,21 @@ class LanguageTrackerProcessor(FrameProcessor):
     def current_language(self) -> str:
         return self._current
 
+    @property
+    def current_script(self) -> str:
+        return self._script
+
+    def _maybe_update_script(self, text: str) -> None:
+        mode = detect_script_mode(text)
+        if mode is None:
+            return
+        if mode == SCRIPT_NATIVE:
+            self._script = SCRIPT_NATIVE
+            return
+        # Roman: ignore short acks so "ok"/"yes" cannot flip a native-script session.
+        if significant_char_count(text) >= self._min_chars:
+            self._script = SCRIPT_ROMAN
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -76,19 +100,27 @@ class LanguageTrackerProcessor(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
-    async def _maybe_switch(self, frame: TranscriptionFrame) -> None:
-        text = (frame.text or "").strip()
+    async def observe_utterance(
+        self,
+        text: str,
+        *,
+        sarvam_language: object | None = None,
+    ) -> None:
+        """Update session language/script from voice STT or typed chat."""
+        text = (text or "").strip()
+        if not text:
+            return
 
         # 1. Explicit user preference ("talk in English", "हिंदी में बताओ")
         #    overrides automatic detection and bypasses the hysteresis window.
         requested = detect_language_request(text)
-        if requested and requested != self._current:
-            await self._apply_switch(
-                requested, source="explicit", confidence=1.0, sample=text
-            )
-            return
         if requested:
-            # Already speaking it — clear any pending drift toward another language.
+            self._maybe_update_script(text)
+            if requested != self._current:
+                await self._apply_switch(
+                    requested, source="explicit", confidence=1.0, sample=text
+                )
+                return
             self._pending = None
             self._pending_count = 0
             return
@@ -96,10 +128,37 @@ class LanguageTrackerProcessor(FrameProcessor):
         # 2. Automatic detection from Sarvam tag + script.
         detected, confidence, source = resolve_detected_language(
             text=text,
-            sarvam_language=getattr(frame, "language", None),
+            sarvam_language=sarvam_language,
             min_chars=self._min_chars,
             min_confidence=self._min_confidence,
         )
+
+        # A substantive Roman-Indic clause is a clear switch signal, even when
+        # Sarvam / script say English. This is the "clear-switch overrides
+        # sticky" rule — several Hindi/Tamil/Telugu tokens beat the fallback.
+        roman_indic = detect_romanized_indic_language(text)
+        if roman_indic and roman_indic != self._current:
+            detected = roman_indic
+            confidence = max(confidence, 0.9)
+            source = "roman-indic"
+        elif (
+            self._current in INDIC_LANGUAGES
+            and detected == LANG_EN
+            and (
+                looks_like_romanized_indic(text)
+                or not looks_like_full_english(text)
+            )
+        ):
+            # Latin / Sarvam-English while already in an Indic language is
+            # usually Hinglish/Tanglish, not a switch back to English.
+            detected = self._current
+            source = "sticky"
+
+        if (
+            significant_char_count(text) >= self._min_chars
+            or detect_script_mode(text) == SCRIPT_NATIVE
+        ):
+            self._maybe_update_script(text)
 
         if not self._initialized_log and detected:
             logger.info(
@@ -141,6 +200,12 @@ class LanguageTrackerProcessor(FrameProcessor):
             return
 
         await self._apply_switch(detected, source=source, confidence=confidence, sample=text)
+
+    async def _maybe_switch(self, frame: TranscriptionFrame) -> None:
+        await self.observe_utterance(
+            frame.text or "",
+            sarvam_language=getattr(frame, "language", None),
+        )
 
     async def _apply_switch(
         self,

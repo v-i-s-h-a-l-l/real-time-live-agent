@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from opening import opening_system_message  # noqa: E402
+from opening import OPENING_USER_SEED, opening_system_message, opening_turn_messages  # noqa: E402
 from processors.session_context import SessionContextStore  # noqa: E402
 
 _MATCH = "After they speak, always match their language (English, Hindi, Tamil, or Telugu)."
@@ -38,3 +38,10 @@ def test_slide_greeting_names_topic_and_section():
     assert "The topic is 'Real Numbers'" in message
     assert "slide 'Euclid's Division Lemma'" in message
     assert _MATCH in message
+
+
+def test_opening_turn_includes_user_seed_for_groq():
+    store = SessionContextStore()
+    messages = opening_turn_messages(store)
+    assert messages[0]["role"] == "system"
+    assert messages[-1] == {"role": "user", "content": OPENING_USER_SEED}

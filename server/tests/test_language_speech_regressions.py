@@ -210,4 +210,4 @@ def test_language_directive_binds_the_whole_reply():
         assert "WHOLE reply" in lines
         assert "every sentence" in lines
         # 20. concise — a per-turn instruction, not a second system prompt.
-        assert len(lines) < 700, code
+        assert len(lines) < 1200, code

@@ -72,7 +72,7 @@ def test_pipeline_prompt_delegates_to_tutor():
     assert TUTOR_TURN_MARKER in get_tutor_system_prompt()
 
 
-def _directive_for(active_language):
+def _directive_for(active_language, reply_script=None):
     from tutor.engine import TutorEngine
     from tutor.types import TutorState
     from tutor.prompts import build_tutor_turn_directive
@@ -88,6 +88,7 @@ def _directive_for(active_language):
         tutor_context=None,
         utterance=utterance,
         active_language=active_language,
+        reply_script=reply_script,
     )
 
 
@@ -126,3 +127,50 @@ def test_system_prompt_language_policy_is_explicit():
     assert "Tamil/Tanglish" in prompt
     assert "Telugu/Tenglish" in prompt
     assert "One English word does not make the turn English" in prompt
+
+
+def test_system_prompt_does_not_quote_refusal_lines():
+    prompt = get_tutor_system_prompt().lower()
+    assert "that's outside our lesson" not in prompt
+    assert "let's stay on topic" not in prompt
+    assert "if mode is redirect" not in prompt
+    assert "grant_pause" in prompt
+    assert "acknowledge_and_steer" not in prompt
+
+
+def test_system_prompt_has_session_engagement_and_break_rules():
+    prompt = get_tutor_system_prompt()
+    assert "NO SELF-INTRODUCTION AFTER THE FIRST TURN" in prompt
+    assert "BREAKS CAN ALWAYS BE ENDED EARLY" in prompt
+    assert "AFTER A TRANSITION IS CONFIRMED" in prompt
+    assert "REINFORCE ENGAGEMENT" in prompt
+    assert "KEEP SMALL TALK BRIEF" in prompt
+    assert "VERIFY MATH BEFORE LABELING" in prompt
+    assert "DELIVER IT IMMEDIATELY" in prompt
+    assert "TARGET THE SPECIFIC POINT OF CONFUSION" in prompt
+    assert "LANGUAGE SWITCHES ARE STICKY" in prompt
+    assert "MATCH THE STUDENT'S SCRIPT" in prompt
+    assert "RELIABLY DETECT LANGUAGE-CAPABILITY QUESTIONS" in prompt
+    assert "NEVER USE \"WELCOME BACK\"" in prompt
+    assert "IF A MESSAGE'S INTENT IS UNCLEAR" in prompt
+    assert "SCRIPT MATCHING MUST BE APPLIED CONSISTENTLY" in prompt
+    assert "CLEAR LANGUAGE SWITCH" in prompt
+    assert "STRUGGLE SIGNALS" in prompt
+    assert "START FROM SOMETHING THE STUDENT ALREADY KNOWS" in prompt
+    assert "BREAK NEW CONCEPTS INTO SMALL SEQUENTIAL PIECES" in prompt
+    assert "SIMPLE, EVERYDAY WORDS BEFORE INTRODUCING TECHNICAL TERMS" in prompt
+    assert "CHECK UNDERSTANDING BEFORE MOVING FORWARD" in prompt
+    assert "USE VISUAL/PHYSICAL LANGUAGE" in prompt
+    assert "FIRST-TIME CONCEPT INTRODUCTION AND SLIDE" in prompt
+    assert "DOES NOT REPLACE EXISTING BORING/CONFUSING-RESPONSE BEHAVIOR" in prompt
+
+
+def test_directive_language_is_sticky_and_names_script():
+    hi = _directive_for("hi-IN")
+    assert "Session language is STICKY" in hi
+    assert "Roman/Latin" in hi
+    assert "Do NOT use Devanagari" in hi
+
+    ta_native = _directive_for("ta-IN", reply_script="native")
+    assert "Tamil script" in ta_native
+    assert "Do not switch to Roman/Latin" in ta_native

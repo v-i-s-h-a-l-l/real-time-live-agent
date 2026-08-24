@@ -17,7 +17,14 @@ sys.path.insert(0, str(ROOT))
 from pipecat.frames.frames import TranscriptionFrame, TTSUpdateSettingsFrame  # noqa: E402
 from pipecat.transcriptions.language import Language  # noqa: E402
 
-from languages import LANG_EN, LANG_HI, LANG_TA, LANG_TE  # noqa: E402
+from languages import (  # noqa: E402
+    LANG_EN,
+    LANG_HI,
+    LANG_TA,
+    LANG_TE,
+    SCRIPT_NATIVE,
+    SCRIPT_ROMAN,
+)
 from processors.language_tracker import LanguageTrackerProcessor  # noqa: E402
 
 
@@ -129,3 +136,84 @@ def test_tamil_sentence_switches_to_tamil():
     tracker, _, _ = _make_tracker(initial=LANG_EN)
     _feed(tracker, "இந்த equation-ஐ step by step பாப்போம் சார்", sarvam=Language.TA_IN)
     assert tracker.current_language == LANG_TA
+    assert tracker.current_script == SCRIPT_NATIVE
+
+
+def test_typed_explicit_tamil_stays_through_roman_followups():
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("speak in Tamil please"))
+    assert tracker.current_language == LANG_TA
+    assert tracker.current_script == SCRIPT_ROMAN
+    for text in ("ok next slide", "yes ready", "enna solve pannu"):
+        asyncio.run(tracker.observe_utterance(text))
+    assert tracker.current_language == LANG_TA
+    assert tracker.current_script == SCRIPT_ROMAN
+
+
+def test_tanglish_after_tamil_does_not_count_as_english():
+    tracker, _, _ = _make_tracker(initial=LANG_TA)
+    _feed(tracker, "enna panrom next", sarvam=Language.EN_IN)
+    _feed(tracker, "seri next slide", sarvam=Language.EN_IN)
+    assert tracker.current_language == LANG_TA
+
+
+def test_native_tamil_script_is_not_flipped_by_short_latin_ack():
+    tracker, _, _ = _make_tracker(initial=LANG_TA)
+    _feed(tracker, "இந்த equation-ஐ step by step பாப்போம் சார்", sarvam=Language.TA_IN)
+    assert tracker.current_script == SCRIPT_NATIVE
+    _feed(tracker, "ok", sarvam=Language.EN_IN)
+    assert tracker.current_language == LANG_TA
+    assert tracker.current_script == SCRIPT_NATIVE
+
+
+def test_explicit_english_still_leaves_an_indic_session():
+    tracker, _, _ = _make_tracker(initial=LANG_TA)
+    asyncio.run(tracker.observe_utterance("talk in English please"))
+    assert tracker.current_language == LANG_EN
+
+
+def test_capability_question_switches_to_that_language():
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("hindi malum hai kya"))
+    assert tracker.current_language == LANG_HI
+    assert tracker.current_script == SCRIPT_ROMAN
+
+    tracker2, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker2.observe_utterance("tamil theriyuma"))
+    assert tracker2.current_language == LANG_TA
+    assert tracker2.current_script == SCRIPT_ROMAN
+
+
+def test_substantive_roman_hinglish_overrides_english_stickiness():
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("yaar mujhe ye samajh nahi aa raha"))
+    assert tracker.current_language == LANG_HI
+    assert tracker.current_script == SCRIPT_ROMAN
+
+
+def test_substantive_roman_tanglish_overrides_english_stickiness():
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("enna pannu neenga sollunga"))
+    assert tracker.current_language == LANG_TA
+
+
+def test_substantive_roman_tenglish_overrides_english_stickiness():
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("nenu enti cheppu meeru"))
+    assert tracker.current_language == LANG_TE
+
+
+def test_clear_hindi_switch_overrides_tamil_stickiness():
+    tracker, _, _ = _make_tracker(initial=LANG_TA)
+    asyncio.run(tracker.observe_utterance("mujhe hindi mein samajhna hai yaar"))
+    assert tracker.current_language == LANG_HI
+
+
+def test_clear_tamil_switch_after_hindi_turn_regression():
+    """User reported: Hindi turn, then 'ennada ivlo kastama iruku' → must be Tamil."""
+    tracker, _, _ = _make_tracker(initial=LANG_EN)
+    asyncio.run(tracker.observe_utterance("yeh concept bahut mushkil hai"))
+    assert tracker.current_language == LANG_HI
+    asyncio.run(tracker.observe_utterance("ennada ivlo kastama iruku"))
+    assert tracker.current_language == LANG_TA
+    assert tracker.current_script == SCRIPT_ROMAN

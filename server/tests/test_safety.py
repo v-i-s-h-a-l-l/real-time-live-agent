@@ -213,6 +213,55 @@ def test_math_turn_resumes_tutoring_after_a_pause():
     assert store.paused is False
 
 
+def test_two_unrelated_math_turns_escape_holding():
+    """A crisis keyword must not swallow the rest of the lesson.
+
+    Detection is unchanged: the first line still trips classify(). The next
+    two turns do not match resume or danger phrases, so tutoring resumes on
+    the second.
+    """
+    from io import StringIO
+
+    from loguru import logger
+
+    from tutor.safety import utterance_hash
+
+    buf = StringIO()
+    sink_id = logger.add(buf, format="{message}")
+    try:
+        store = SafetyStore()
+        trigger = "How can I die?"
+        alert = store.apply(trigger, language=LANG_EN, now=1.0)
+        assert alert is not None
+        assert alert.kind is SafetyKind.ALERT
+        assert store.paused is True
+        logs = buf.getvalue()
+        assert "safety_turn_swallowed" in logs
+        assert utterance_hash(trigger) in logs
+        assert trigger not in logs
+        assert "self_harm" in logs
+
+        first = "What is the value of x here?"
+        holding = store.apply(first, language=LANG_EN, now=2.0)
+        assert holding is not None
+        assert holding.kind is SafetyKind.HOLDING
+        assert holding.swallow is True
+        assert store.paused is True
+        assert utterance_hash(first) in buf.getvalue()
+        assert first not in buf.getvalue()
+
+        second = "I got 12 as the answer"
+        resumed = store.apply(second, language=LANG_EN, now=3.0)
+        assert resumed is not None
+        assert resumed.kind is SafetyKind.RESUME
+        assert resumed.swallow is False
+        assert store.paused is False
+        assert store.last_category == "self_harm"
+        assert second not in buf.getvalue()
+    finally:
+        logger.remove(sink_id)
+
+
 def test_immediate_danger_offers_tele_manas():
     store = SafetyStore()
     store.apply("I feel like committing suicide", language=LANG_EN, now=1.0)

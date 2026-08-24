@@ -28,6 +28,28 @@ from security import (
 _SESSION_MARKER = "[SESSION_CONTEXT]"
 _LEARNING_MARKER = "[LEARNING_CONTEXT]"
 
+# Pure student-state turns (grant a break, let them leave, react to a joke)
+# must not leak the slide identity. If the LLM can still see the topic name,
+# the section title, the visible text, or the formulas in a [LEARNING_CONTEXT]
+# block, it will keep appending "Let's stay on Euclid's Division Lemma…" to a
+# reply that should just say "go grab something to eat."
+_CONVERSATIONAL_LEARNING_NOTE = (
+    f"{_LEARNING_MARKER} On-screen lesson content is withheld this turn — the "
+    "tutor is having a brief human conversation about the student's state, "
+    "not teaching. Do not name the topic, chapter, section, slide, lemma, "
+    "theorem, or any formula. Do not quote or restate visible content. Do not "
+    "offer to move Next. Do not say 'let's stay on…' or 'let's focus on…'. "
+    "The lesson will resume on the next teaching turn from the last "
+    "conversation. Do not invent lesson content either — if you don't have it "
+    "in this turn, don't mention it."
+)
+_CONVERSATIONAL_SESSION_NOTE = (
+    f"{_SESSION_MARKER} Study session frame withheld this turn. Respond to what "
+    "the student actually said as a human tutor would. Do not name the current "
+    "topic, chapter, or subject, and do not steer the conversation back to a "
+    "specific lesson unless the chosen tutor action for this turn says so."
+)
+
 
 class SessionContextStore:
     """Mutable per-connection store for session + learning + tutor-only payloads."""
@@ -142,6 +164,70 @@ def _learning_note(context: dict[str, Any]) -> str:
         "when they are ready."
     )
     return "\n".join(lines)
+
+
+def conversational_learning_note() -> str:
+    """Placeholder for [LEARNING_CONTEXT] on a purely conversational turn."""
+    return _CONVERSATIONAL_LEARNING_NOTE
+
+
+def conversational_session_note() -> str:
+    """Placeholder for [SESSION_CONTEXT] on a purely conversational turn."""
+    return _CONVERSATIONAL_SESSION_NOTE
+
+
+def scoped_learning_note(context: dict[str, Any]) -> str:
+    """Compact [LEARNING_CONTEXT] for scope-holding turns.
+
+    Keeps the topic and section name so the tutor can say "we're on Euclid's
+    Division Lemma, that's later" naturally. Drops the visible slide text, the
+    formulas on screen, and the "Ground answers / Invite Next" tail — none of
+    that belongs in a redirect.
+    """
+    class_label = context.get("classLabel") or context.get("classId") or "Class 10"
+    subject = context.get("subjectName") or context.get("subjectId") or "Mathematics"
+    topic = context.get("topicTitle") or context.get("topicId") or "current topic"
+    section = context.get("sectionTitle") or context.get("sectionId")
+
+    lines = [
+        f"{_LEARNING_MARKER} Scope frame only — the student is trying to leave "
+        "this lesson. Keep the anchor visible, do not teach.",
+        f"- Class: {class_label}",
+        f"- Subject: {subject}",
+        f"- Current topic: {topic}",
+    ]
+    if section:
+        lines.append(f"- Current section: {section}")
+    lines.append(
+        "- Slide text, formulas, and next-step invitation are withheld this "
+        "turn. You may name the current topic once to hold the line, but do "
+        "NOT explain the concept and do NOT quote or restate any formula."
+    )
+    return "\n".join(lines)
+
+
+def scoped_session_note(context: dict[str, Any]) -> str:
+    """[SESSION_CONTEXT] variant for scope-holding turns.
+
+    Keeps class/subject/chapter/topic so the tutor knows the anchor, but drops
+    the "teach helpfully / offer to return" tail so it does not double up with
+    the redirect strategy already coming from the tutor turn directive.
+    """
+    class_label = context.get("classLabel") or context.get("classId") or "Class 10"
+    subject = context.get("subjectName") or context.get("subjectId") or "Mathematics"
+    chapter = context.get("chapterTitle") or context.get("chapterId") or "current chapter"
+    topic = context.get("topicTitle") or context.get("topicId") or "current topic"
+
+    return "\n".join(
+        [
+            f"{_SESSION_MARKER} Scope frame only — the student is trying to "
+            "leave the current lesson. Do not open a general conversation.",
+            f"- Class: {class_label}",
+            f"- Subject: {subject}",
+            f"- Chapter: {chapter}",
+            f"- Topic: {topic}",
+        ]
+    )
 
 
 def _upsert_marked_system_message(

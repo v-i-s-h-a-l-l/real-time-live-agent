@@ -11,9 +11,12 @@ sys.path.insert(0, str(ROOT))
 from processors.session_context import (  # noqa: E402
     SessionContextStore,
     _LEARNING_MARKER,
+    _SESSION_MARKER,
     _learning_note,
     _system_note,
     _upsert_marked_system_message,
+    conversational_learning_note,
+    conversational_session_note,
 )
 
 
@@ -102,6 +105,32 @@ def test_learning_note_strips_injected_markers():
     )
     assert "[TUTOR_TURN]" not in note
     assert "Quadratic Formula" in note
+
+
+def test_conversational_learning_note_names_no_topic_or_formula():
+    note = conversational_learning_note()
+    assert _LEARNING_MARKER in note
+    assert "withheld" in note.lower()
+    # No specific slide identity, no actual formula, no visible-content quote.
+    for banned in (
+        "euclid",
+        "division lemma",
+        "quadratic formula",
+        "a = bq + r",
+        "-b/a",
+        "current section:",
+        "visible content:",
+    ):
+        assert banned not in note.lower(), banned
+
+
+def test_conversational_session_note_drops_topic_frame():
+    note = conversational_session_note()
+    assert _SESSION_MARKER in note
+    assert "withheld" in note.lower()
+    # Session frame should stop referring the LLM to the specific study session.
+    for banned in ("- class:", "- subject:", "- chapter:", "- topic:", "euclid"):
+        assert banned not in note.lower(), banned
 
 
 def test_tutor_context_store_separate_from_learning():

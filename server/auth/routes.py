@@ -25,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 GENERIC_CREDENTIALS = "invalid_credentials"
-GENERIC_CREATE = "could_not_create"
+GENERIC_SIGNUP_CONFLICT = "check_your_email"
 
 
 class SignUpBody(BaseModel):
@@ -111,7 +111,7 @@ async def signup(body: SignUpBody, request: Request) -> dict[str, Any]:
         get_store().create_user, email=email, password_hash=password_hash
     )
     if user is None:
-        raise HTTPException(status_code=400, detail=GENERIC_CREATE)
+        raise HTTPException(status_code=409, detail=GENERIC_SIGNUP_CONFLICT)
     raw, _session = await asyncio.to_thread(
         get_store().create_refresh_session, user_id=user.id
     )

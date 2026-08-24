@@ -24,7 +24,7 @@ class AudioCaptureProcessor extends AudioWorkletProcessor {
         // How many consecutive "voiced" frames before we declare speech.
         // At 128 samples / 16 kHz each frame ≈ 8 ms → 4 frames ≈ 32 ms
         this._speechConfirmFrames = 4;
-        this._silenceConfirmFrames = 12;  // ~96 ms of quiet to end speech
+        this._silenceConfirmFrames = 138;  // ~1.1s of quiet (8ms frames) to end speech
 
         // ── Spectral gate ──────────────────────────────────────────────
         this._fftSize = 256;          // must be power-of-two
